@@ -397,5 +397,6 @@ func isFastForwardRejected(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "non-fast-forward") ||
 		strings.Contains(msg, "failed to update ref") ||
-		strings.Contains(msg, "reference already exists")
+		strings.Contains(msg, "reference already exists") ||
+		strings.Contains(msg, "incorrect old value provided")
 }
