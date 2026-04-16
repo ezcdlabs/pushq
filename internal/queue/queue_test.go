@@ -266,29 +266,3 @@ func TestListEntries_ReturnsEntriesInQueueOrder(t *testing.T) {
 
 // TestJoin_ConcurrentJoins_BothSucceed verifies that two clones joining
 // simultaneously both end up in the queue (optimistic lock retry works).
-func TestJoin_ConcurrentJoins_BothSucceed(t *testing.T) {
-	remote := gittest.NewRemote(t)
-	alice := remote.NewClone(t)
-	bob := remote.NewClone(t)
-
-	// Both join without fetching first — one will win the push race and the
-	// other must retry and also succeed.
-	errCh := make(chan error, 2)
-	go func() { errCh <- queue.Join(alice.Path, "origin", "alice-100", "refs/pushq/alice-100") }()
-	go func() { errCh <- queue.Join(bob.Path, "origin", "bob-200", "refs/pushq/bob-200") }()
-
-	if err := <-errCh; err != nil {
-		t.Fatalf("first join failed: %v", err)
-	}
-	if err := <-errCh; err != nil {
-		t.Fatalf("second join failed: %v", err)
-	}
-
-	entries, err := queue.ListEntries(alice.Path, "origin")
-	if err != nil {
-		t.Fatalf("ListEntries failed: %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries after concurrent joins, got %d: %v", len(entries), entries)
-	}
-}

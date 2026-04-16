@@ -35,59 +35,24 @@ type LandedEntry struct {
 // Join adds an entry to the queue with status "waiting" and pushes the state
 // branch. Retries automatically on fast-forward push failures.
 func Join(repoPath, remote, entryID, entryRef string) error {
-	entry := protocol.QueueEntry{
-		Ref:    entryRef,
-		Status: protocol.StatusWaiting,
-	}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-	return updateStateBranch(repoPath, remote, func(files map[string][]byte) {
-		files["entries/"+entryID+".json"] = data
-	}, "join: "+entryID)
+	return defaultManager.join(repoPath, remote, entryID, entryRef)
 }
 
 // SetStatus updates the status of an existing entry and pushes the state branch.
 func SetStatus(repoPath, remote, entryID string, status protocol.Status) error {
-	return updateStateBranch(repoPath, remote, func(files map[string][]byte) {
-		existing := files["entries/"+entryID+".json"]
-		var entry protocol.QueueEntry
-		if err := json.Unmarshal(existing, &entry); err == nil {
-			entry.Status = status
-			if data, err := json.Marshal(entry); err == nil {
-				files["entries/"+entryID+".json"] = data
-			}
-		}
-	}, "status: "+entryID+" "+string(status))
+	return defaultManager.setStatus(repoPath, remote, entryID, status)
 }
 
 // RemoveEntry deletes an entry from the state branch tree (used for ejections).
 func RemoveEntry(repoPath, remote, entryID, reason string) error {
-	return updateStateBranch(repoPath, remote, func(files map[string][]byte) {
-		delete(files, "entries/"+entryID+".json")
-	}, reason+": "+entryID)
+	return defaultManager.removeEntry(repoPath, remote, entryID, reason)
 }
 
 // LandEntry removes the active entry file and writes entries/_landed.json,
 // replacing any previous landed record. mainSHA is the commit SHA on the main
 // branch that this entry landed as.
 func LandEntry(repoPath, remote, entryID, mainSHA string) error {
-	entryFile := "entries/" + entryID + ".json"
-	return updateStateBranch(repoPath, remote, func(files map[string][]byte) {
-		// Read the entry's ref before deleting it.
-		var ref string
-		if data, ok := files[entryFile]; ok {
-			var entry protocol.QueueEntry
-			if err := json.Unmarshal(data, &entry); err == nil {
-				ref = entry.Ref
-			}
-		}
-		delete(files, entryFile)
-		if landed, err := json.Marshal(LandedEntry{Ref: ref, MainSHA: mainSHA}); err == nil {
-			files[landedFile] = landed
-		}
-	}, "land: "+entryID)
+	return defaultManager.landEntry(repoPath, remote, entryID, mainSHA)
 }
 
 // ReadState fetches the state branch and returns active entries in queue order
@@ -132,9 +97,69 @@ func ListEntries(repoPath, remote string) ([]EntryRecord, error) {
 
 // --- internal ----------------------------------------------------------------
 
+// stateManager holds the push function used by the optimistic lock loop.
+// Tests construct their own stateManager with a scripted pushFn to exercise
+// specific retry scenarios without mutating any global state.
+type stateManager struct {
+	pushFn func(repoPath, remote string) error
+}
+
+// defaultManager is used by all public functions in production.
+var defaultManager = &stateManager{pushFn: pushStateBranch}
+
+func (sm *stateManager) join(repoPath, remote, entryID, entryRef string) error {
+	entry := protocol.QueueEntry{
+		Ref:    entryRef,
+		Status: protocol.StatusWaiting,
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	return sm.updateStateBranch(repoPath, remote, func(files map[string][]byte) {
+		files["entries/"+entryID+".json"] = data
+	}, "join: "+entryID)
+}
+
+func (sm *stateManager) setStatus(repoPath, remote, entryID string, status protocol.Status) error {
+	return sm.updateStateBranch(repoPath, remote, func(files map[string][]byte) {
+		existing := files["entries/"+entryID+".json"]
+		var entry protocol.QueueEntry
+		if err := json.Unmarshal(existing, &entry); err == nil {
+			entry.Status = status
+			if data, err := json.Marshal(entry); err == nil {
+				files["entries/"+entryID+".json"] = data
+			}
+		}
+	}, "status: "+entryID+" "+string(status))
+}
+
+func (sm *stateManager) removeEntry(repoPath, remote, entryID, reason string) error {
+	return sm.updateStateBranch(repoPath, remote, func(files map[string][]byte) {
+		delete(files, "entries/"+entryID+".json")
+	}, reason+": "+entryID)
+}
+
+func (sm *stateManager) landEntry(repoPath, remote, entryID, mainSHA string) error {
+	entryFile := "entries/" + entryID + ".json"
+	return sm.updateStateBranch(repoPath, remote, func(files map[string][]byte) {
+		var ref string
+		if data, ok := files[entryFile]; ok {
+			var entry protocol.QueueEntry
+			if err := json.Unmarshal(data, &entry); err == nil {
+				ref = entry.Ref
+			}
+		}
+		delete(files, entryFile)
+		if landed, err := json.Marshal(LandedEntry{Ref: ref, MainSHA: mainSHA}); err == nil {
+			files[landedFile] = landed
+		}
+	}, "land: "+entryID)
+}
+
 // updateStateBranch is the optimistic lock loop: fetch, mutate the file tree,
 // commit, push. Retries on fast-forward rejection.
-func updateStateBranch(repoPath, remote string, mutate func(map[string][]byte), message string) error {
+func (sm *stateManager) updateStateBranch(repoPath, remote string, mutate func(map[string][]byte), message string) error {
 	for {
 		// Fetch (or init) the state branch.
 		_ = fetchStateBranch(repoPath, remote) // ignore error — branch may not exist yet
@@ -187,7 +212,7 @@ func updateStateBranch(repoPath, remote string, mutate func(map[string][]byte), 
 		}
 
 		// Push.
-		pushErr := pushStateBranch(repoPath, remote)
+		pushErr := sm.pushFn(repoPath, remote)
 		if pushErr == nil {
 			return nil
 		}
@@ -253,8 +278,6 @@ func buildTree(repo *gogit.Repository, files map[string][]byte) (plumbing.Hash, 
 		}
 		_ = blob
 
-		// Handle subdirectories — go-git tree objects are flat per-level, so
-		// for simple "entries/<id>.json" paths we build a nested tree.
 		entries = append(entries, object.TreeEntry{
 			Name: path,
 			Mode: 0100644,
