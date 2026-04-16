@@ -19,3 +19,18 @@ Do NOT update README.md for:
 - Pure implementation details that belong in code comments
 - Ephemeral task tracking (use TodoWrite for that)
 - Anything already accurately described
+
+## Test-driven development
+
+Write tests before implementation. The red/green/refactor cycle is the default
+approach for all new behaviour.
+
+Specifically:
+- New functions that classify or categorise (like `isFastForwardRejected`) must
+  have a table-driven unit test covering all known cases before the function is
+  written. When a new case is discovered at runtime, add the failing test first,
+  then fix the code.
+- New public API behaviour must have an acceptance test (or unit test) that fails
+  before the implementation is added.
+- Do not write implementation speculatively and backfill tests — always go
+  red first.
