@@ -1,0 +1,90 @@
+version: 2
+
+project_name: git-pushq
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: git-pushq
+    main: ./cmd/git-pushq
+    binary: git-pushq
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: git-pushq
+    builds: [git-pushq]
+    name_template: "git-pushq_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - .pushq.json.example
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: ezcdlabs
+    name: pushq
+  name_template: "v{{ .Version }}"
+  header: |
+    ## Installation
+
+    Download the binary for your platform below and place `git-pushq` somewhere on your `$PATH`.
+    Git will then expose it as `git pushq`.
+
+    ### macOS / Linux (curl)
+    ```sh
+    # example for linux amd64 — adjust for your platform
+    curl -sSL https://github.com/ezcdlabs/pushq/releases/download/{{ .Tag }}/git-pushq_{{ .Version }}_linux_amd64.tar.gz \
+      | tar -xz git-pushq && sudo mv git-pushq /usr/local/bin/
+    ```
+
+scoops:
+  - name: git-pushq
+    repository:
+      owner: ezcdlabs
+      name: scoop-bucket
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/ezcdlabs/pushq
+    description: Serverless push queue for trunk-based development via git refs
+    license: MIT
+
+brews:
+  - name: git-pushq
+    repository:
+      owner: ezcdlabs
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/ezcdlabs/pushq
+    description: Serverless push queue for trunk-based development via git refs
+    license: MIT
+    install: |
+      bin.install "git-pushq"
+    test: |
+      system "#{bin}/git-pushq", "--version"

@@ -1,0 +1,19 @@
+# Build output
+/git-pushq
+*.exe
+dist/
+
+# Test binaries
+*.test
+*.out
+
+# Go workspace (local only)
+go.work
+go.work.sum
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/

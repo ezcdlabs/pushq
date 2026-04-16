@@ -1,0 +1,4 @@
+{
+  "test_command": "make test",
+  "main_branch": "main"
+}
