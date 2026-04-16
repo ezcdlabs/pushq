@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/ezcdlabs/pushq/internal/clock"
+	"github.com/ezcdlabs/pushq/internal/gitenv"
 	"github.com/ezcdlabs/pushq/internal/queue"
 	"github.com/ezcdlabs/pushq/internal/refs"
 	"github.com/ezcdlabs/pushq/internal/runner"
@@ -20,6 +23,10 @@ type PushOptions struct {
 	TestCommand   string
 	CommitMessage string
 	Username      string
+	// Clock controls the timer used for queue-state polls when entries are
+	// ahead. Defaults to the real clock when nil. Inject a fake clock in
+	// tests to avoid waiting on real time.
+	Clock clock.Clock
 }
 
 // Push runs the full pushq lifecycle and streams events on the returned
@@ -40,6 +47,9 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 	}
 	if opts.MainBranch == "" {
 		opts.MainBranch = "main"
+	}
+	if opts.Clock == nil {
+		opts.Clock = clock.Real()
 	}
 
 	events <- PhaseChanged{Phase: PhaseJoining}
@@ -115,7 +125,10 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 			events <- PhaseChanged{Phase: PhaseTesting}
 
 			lines := make(chan string, 64)
+			var linesWg sync.WaitGroup
+			linesWg.Add(1)
 			go func() {
+				defer linesWg.Done()
 				for line := range lines {
 					events <- LogLine{Text: line}
 				}
@@ -123,6 +136,7 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 
 			result, runErr := runner.Run(ctx, opts.TestCommand, opts.RepoPath, lines)
 			close(lines)
+			linesWg.Wait() // ensure all lines are forwarded before Done can be sent
 			testStack.Cleanup()
 
 			if runErr != nil {
@@ -142,6 +156,12 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 		// 7. Tests are passing. Only push to main once no entries are ahead.
 		if len(aheadRefs) > 0 {
 			events <- PhaseChanged{Phase: PhaseWaiting}
+			select {
+			case <-ctx.Done():
+				_ = eject(opts.RepoPath, opts.Remote, entryID, entryRef)
+				return ctx.Err()
+			case <-opts.Clock.After(5 * time.Second):
+			}
 			continue
 		}
 
@@ -160,6 +180,12 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 		}
 
 		mainSHA, shaErr := gitRevParse(opts.RepoPath, pushStack.BranchName)
+		originSHA, _ := gitRevParse(opts.RepoPath, opts.Remote+"/"+opts.MainBranch)
+		if shaErr == nil && mainSHA == originSHA {
+			pushStack.Cleanup()
+			_ = eject(opts.RepoPath, opts.Remote, entryID, entryRef)
+			return fmt.Errorf("landing stack is identical to %s/%s — entry ref may be empty or already landed", opts.Remote, opts.MainBranch)
+		}
 		pushErr := refs.PushRef(opts.RepoPath, opts.Remote, pushStack.BranchName, opts.MainBranch)
 		pushStack.Cleanup()
 
@@ -245,6 +271,7 @@ func squashAndPushEntryRef(repoPath, remote, mainBranch, message, entryRef strin
 func gitRevParse(repoPath, ref string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", ref)
 	cmd.Dir = repoPath
+	cmd.Env = gitenv.Clean()
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -265,6 +292,7 @@ func isFastForwardRejected(err error) bool {
 func git(repoPath string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
+	cmd.Env = gitenv.Clean()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, out)
@@ -275,7 +303,7 @@ func git(repoPath string, args ...string) error {
 func gitCommit(repoPath, message string) error {
 	cmd := exec.Command("git", "commit", "-m", message)
 	cmd.Dir = repoPath
-	cmd.Env = append(cmd.Environ(),
+	cmd.Env = append(gitenv.Clean(),
 		"GIT_AUTHOR_NAME=pushq",
 		"GIT_AUTHOR_EMAIL=pushq@local",
 		"GIT_COMMITTER_NAME=pushq",

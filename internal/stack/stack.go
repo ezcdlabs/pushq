@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/ezcdlabs/pushq/internal/gitenv"
 )
 
 // Options configures a stack build.
@@ -83,6 +85,7 @@ func sanitiseRef(ref string) string {
 func git(repoPath string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
+	cmd.Env = gitenv.Clean()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %v: %w\n%s", args, err, out)

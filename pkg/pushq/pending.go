@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-
 // PendingCommit is a commit that exists locally but has not yet landed on main.
 type PendingCommit struct {
 	Hash    string // full 40-char SHA
@@ -50,4 +49,3 @@ func ListPendingCommits(repoPath, remote, mainBranch string) ([]PendingCommit, e
 	}
 	return commits, nil
 }
-

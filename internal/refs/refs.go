@@ -3,6 +3,8 @@ package refs
 import (
 	"fmt"
 	"os/exec"
+
+	"github.com/ezcdlabs/pushq/internal/gitenv"
 )
 
 // PushRef pushes a local ref to a remote ref. Returns an error if the push is
@@ -24,6 +26,7 @@ func FetchRef(repoPath, remote, remoteRef, localRef string) error {
 func git(repoPath string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
+	cmd.Env = gitenv.Clean()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %v: %w\n%s", args, err, out)

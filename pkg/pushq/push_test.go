@@ -2,13 +2,45 @@ package pushq_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ezcdlabs/pushq/internal/clock"
 	"github.com/ezcdlabs/pushq/internal/gittest"
+	"github.com/ezcdlabs/pushq/internal/queue"
 	"github.com/ezcdlabs/pushq/pkg/pushq"
 )
+
+// testClock creates a Fake clock and starts a background driver goroutine
+// that calls Advance(5s) whenever a timer is registered. This means any
+// wait-poll loop in the system under test unblocks immediately rather than
+// sleeping for real time. The driver stops when the test ends.
+func testClock(t *testing.T) *clock.Fake {
+	t.Helper()
+	fake := clock.NewFake()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-fake.TimerAdded():
+				fake.Advance(5 * time.Second)
+			}
+		}
+	}()
+	return fake
+}
+
+// withClock returns a copy of opts with Clock set to clk.
+func withClock(opts pushq.PushOptions, clk clock.Clock) pushq.PushOptions {
+	opts.Clock = clk
+	return opts
+}
 
 // pushAndWait runs Push and blocks until Done, returning the error from Done.
 // Used by tests that only care about the outcome, not the event stream.
@@ -60,6 +92,7 @@ func TestPush_SingleDeveloper_TestsPass_LandsOnMain(t *testing.T) {
 		TestCommand:   gittest.PassingTestCommand(),
 		CommitMessage: "add feature",
 		Username:      "alice",
+
 	})
 	if err != nil {
 		t.Fatalf("Push() returned unexpected error: %v", err)
@@ -119,6 +152,7 @@ func TestPush_SingleDeveloper_TestsFail_EjectsFromQueue(t *testing.T) {
 		TestCommand:   gittest.FailingTestCommand(),
 		CommitMessage: "add feature",
 		Username:      "alice",
+
 	})
 	if err == nil {
 		t.Fatal("Push() should return an error when tests fail")
@@ -184,6 +218,7 @@ func TestPush_TwoDevelopers_Sequential_BothLand(t *testing.T) {
 // TestPush_TwoDevelopers_Concurrent_BothLand verifies that two developers
 // pushing at the same time both eventually land on main.
 func TestPush_TwoDevelopers_Concurrent_BothLand(t *testing.T) {
+	clk := testClock(t)
 	remote := gittest.NewRemote(t)
 	aliceClone := remote.NewClone(t)
 	bobClone := remote.NewClone(t)
@@ -198,10 +233,10 @@ func TestPush_TwoDevelopers_Concurrent_BothLand(t *testing.T) {
 	ch := make(chan result, 2)
 
 	go func() {
-		ch <- result{pushAndWait(context.Background(), alicePushOpts(aliceClone.Path))}
+		ch <- result{pushAndWait(context.Background(), withClock(alicePushOpts(aliceClone.Path), clk))}
 	}()
 	go func() {
-		ch <- result{pushAndWait(context.Background(), bobPushOpts(bobClone.Path))}
+		ch <- result{pushAndWait(context.Background(), withClock(bobPushOpts(bobClone.Path), clk))}
 	}()
 
 	r1, r2 := <-ch, <-ch
@@ -236,6 +271,7 @@ func TestPush_TwoDevelopers_Concurrent_BothLand(t *testing.T) {
 // developer's tests fail and they eject, the second developer rebuilds their
 // stack without the ejected entry and still lands on main.
 func TestPush_TwoDevelopers_FirstEjected_SecondLands(t *testing.T) {
+	clk := testClock(t)
 	remote := gittest.NewRemote(t)
 	aliceClone := remote.NewClone(t)
 	bobClone := remote.NewClone(t)
@@ -251,17 +287,17 @@ func TestPush_TwoDevelopers_FirstEjected_SecondLands(t *testing.T) {
 	ch := make(chan result, 2)
 
 	go func() {
-		ch <- result{pushAndWait(context.Background(), pushq.PushOptions{
+		ch <- result{pushAndWait(context.Background(), withClock(pushq.PushOptions{
 			RepoPath:      aliceClone.Path,
 			Remote:        "origin",
 			MainBranch:    "main",
 			TestCommand:   gittest.FailingTestCommand(),
 			CommitMessage: "alice's feature",
 			Username:      "alice",
-		})}
+		}, clk))}
 	}()
 	go func() {
-		ch <- result{pushAndWait(context.Background(), bobPushOpts(bobClone.Path))}
+		ch <- result{pushAndWait(context.Background(), withClock(bobPushOpts(bobClone.Path), clk))}
 	}()
 
 	var aliceErr, bobErr error
@@ -309,6 +345,7 @@ func TestPush_TwoDevelopers_FirstEjected_SecondLands(t *testing.T) {
 // different combinations of entries ahead, and may need to retest as earlier
 // entries resolve — but all three must eventually land.
 func TestPush_ThreeDevelopers_Concurrent_AllLand(t *testing.T) {
+	clk := testClock(t)
 	remote := gittest.NewRemote(t)
 	aliceClone := remote.NewClone(t)
 	bobClone := remote.NewClone(t)
@@ -327,20 +364,20 @@ func TestPush_ThreeDevelopers_Concurrent_AllLand(t *testing.T) {
 	ch := make(chan result, 3)
 
 	go func() {
-		ch <- result{pushAndWait(context.Background(), alicePushOpts(aliceClone.Path))}
+		ch <- result{pushAndWait(context.Background(), withClock(alicePushOpts(aliceClone.Path), clk))}
 	}()
 	go func() {
-		ch <- result{pushAndWait(context.Background(), bobPushOpts(bobClone.Path))}
+		ch <- result{pushAndWait(context.Background(), withClock(bobPushOpts(bobClone.Path), clk))}
 	}()
 	go func() {
-		ch <- result{pushAndWait(context.Background(), pushq.PushOptions{
+		ch <- result{pushAndWait(context.Background(), withClock(pushq.PushOptions{
 			RepoPath:      carolClone.Path,
 			Remote:        "origin",
 			MainBranch:    "main",
 			TestCommand:   gittest.PassingTestCommand(),
 			CommitMessage: "carol's feature",
 			Username:      "carol",
-		})}
+		}, clk))}
 	}()
 
 	for range 3 {
@@ -375,6 +412,7 @@ func TestPush_ThreeDevelopers_Concurrent_AllLand(t *testing.T) {
 // developers modify the same file, the one who joins first lands and the
 // other — whose cherry-pick onto the first's changes would conflict — ejects.
 func TestPush_ConflictingChanges_OneLandsOneEjects(t *testing.T) {
+	clk := testClock(t)
 	remote := gittest.NewRemote(t)
 	aliceClone := remote.NewClone(t)
 	bobClone := remote.NewClone(t)
@@ -391,10 +429,10 @@ func TestPush_ConflictingChanges_OneLandsOneEjects(t *testing.T) {
 	ch := make(chan result, 2)
 
 	go func() {
-		ch <- result{pushAndWait(context.Background(), alicePushOpts(aliceClone.Path))}
+		ch <- result{pushAndWait(context.Background(), withClock(alicePushOpts(aliceClone.Path), clk))}
 	}()
 	go func() {
-		ch <- result{pushAndWait(context.Background(), bobPushOpts(bobClone.Path))}
+		ch <- result{pushAndWait(context.Background(), withClock(bobPushOpts(bobClone.Path), clk))}
 	}()
 
 	r1, r2 := <-ch, <-ch
@@ -436,6 +474,7 @@ func TestPush_ConflictingChanges_OneLandsOneEjects(t *testing.T) {
 // implementation incorrectly retests after alice lands, carol's second test run
 // will fail and the push will return an error.
 func TestPush_EntryAboveLands_NoRetest(t *testing.T) {
+	clk := testClock(t)
 	remote := gittest.NewRemote(t)
 	aliceClone := remote.NewClone(t)
 	carolClone := remote.NewClone(t)
@@ -453,17 +492,17 @@ func TestPush_EntryAboveLands_NoRetest(t *testing.T) {
 	ch := make(chan result, 2)
 
 	go func() {
-		ch <- result{pushAndWait(context.Background(), alicePushOpts(aliceClone.Path))}
+		ch <- result{pushAndWait(context.Background(), withClock(alicePushOpts(aliceClone.Path), clk))}
 	}()
 	go func() {
-		ch <- result{pushAndWait(context.Background(), pushq.PushOptions{
+		ch <- result{pushAndWait(context.Background(), withClock(pushq.PushOptions{
 			RepoPath:      carolClone.Path,
 			Remote:        "origin",
 			MainBranch:    "main",
 			TestCommand:   gittest.RunOnceTestCommand(carolFlag),
 			CommitMessage: "carol's feature",
 			Username:      "carol",
-		})}
+		}, clk))}
 	}()
 
 	r1, r2 := <-ch, <-ch
@@ -498,6 +537,7 @@ func TestPush_EntryAboveLands_NoRetest(t *testing.T) {
 // the middle of the queue ejects (tests fail), the developers behind them
 // rebuild their stacks, retest, and still land on main.
 func TestPush_MiddleDeveloperEjects_OthersLand(t *testing.T) {
+	clk := testClock(t)
 	remote := gittest.NewRemote(t)
 	aliceClone := remote.NewClone(t)
 	bobClone := remote.NewClone(t)
@@ -517,27 +557,27 @@ func TestPush_MiddleDeveloperEjects_OthersLand(t *testing.T) {
 
 	// Alice and carol have passing tests; bob's tests fail.
 	go func() {
-		ch <- result{pushAndWait(context.Background(), alicePushOpts(aliceClone.Path))}
+		ch <- result{pushAndWait(context.Background(), withClock(alicePushOpts(aliceClone.Path), clk))}
 	}()
 	go func() {
-		ch <- result{pushAndWait(context.Background(), pushq.PushOptions{
+		ch <- result{pushAndWait(context.Background(), withClock(pushq.PushOptions{
 			RepoPath:      bobClone.Path,
 			Remote:        "origin",
 			MainBranch:    "main",
 			TestCommand:   gittest.FailingTestCommand(),
 			CommitMessage: "bob's feature",
 			Username:      "bob",
-		})}
+		}, clk))}
 	}()
 	go func() {
-		ch <- result{pushAndWait(context.Background(), pushq.PushOptions{
+		ch <- result{pushAndWait(context.Background(), withClock(pushq.PushOptions{
 			RepoPath:      carolClone.Path,
 			Remote:        "origin",
 			MainBranch:    "main",
 			TestCommand:   gittest.PassingTestCommand(),
 			CommitMessage: "carol's feature",
 			Username:      "carol",
-		})}
+		}, clk))}
 	}()
 
 	var bobErr error
@@ -584,5 +624,89 @@ func TestPush_MiddleDeveloperEjects_OthersLand(t *testing.T) {
 	}
 	if !hasAlice || !hasCarol {
 		t.Fatalf("expected alice's and carol's commits on main, got: %v", messages)
+	}
+}
+
+// TestPush_GITDIRInEnvironment_IsIgnored verifies that a poisoned GIT_DIR in
+// the process environment does not break the push. When git invokes an external
+// command (e.g. "git pushq"), it sets GIT_DIR to its own .git directory. Every
+// subprocess git call we make would inherit that and operate on the wrong repo
+// unless we explicitly strip it.
+func TestPush_GITDIRInEnvironment_IsIgnored(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+	clone.WriteFile("feature.txt", "hello")
+	clone.CommitAll("add feature")
+
+	// Set GIT_DIR after repo setup so that gittest helpers are not affected.
+	// This simulates git setting GIT_DIR in the environment before invoking
+	// "git pushq" as an external subcommand.
+	t.Setenv("GIT_DIR", "/this-path-does-not-exist")
+
+	err := pushAndWait(context.Background(), pushq.PushOptions{
+		RepoPath:      clone.Path,
+		Remote:        "origin",
+		MainBranch:    "main",
+		TestCommand:   gittest.PassingTestCommand(),
+		CommitMessage: "add feature",
+		Username:      "alice",
+
+	})
+	if err != nil {
+		t.Fatalf("push failed with poisoned GIT_DIR in environment: %v", err)
+	}
+}
+
+// TestPush_ContextCancelledWhileWaiting_EjectsEntry verifies that cancelling
+// the context while a developer is waiting for entries ahead causes the entry
+// to be ejected from the queue and context.Canceled to be returned.
+func TestPush_ContextCancelledWhileWaiting_EjectsEntry(t *testing.T) {
+	clk := testClock(t)
+	remote := gittest.NewRemote(t)
+	aliceClone := remote.NewClone(t)
+	bobClone := remote.NewClone(t)
+
+	// Add alice to the queue state manually so bob will be behind her.
+	// Her entryRef does not need to be a real ref on the remote — stack.Build
+	// silently skips refs that cannot be fetched, so bob still tests and passes,
+	// then enters PhaseWaiting because alice is ahead of him in the state branch.
+	if err := queue.Join(aliceClone.Path, "origin", "alice-1", "refs/pushq/alice-1"); err != nil {
+		t.Fatalf("queue.Join alice: %v", err)
+	}
+
+	bobClone.WriteFile("bob.txt", "bob's work")
+	bobClone.CommitAll("bob's feature")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var finalErr error
+	cancelledOnce := false
+	for ev := range pushq.Push(ctx, withClock(bobPushOpts(bobClone.Path), clk)) {
+		if ph, ok := ev.(pushq.PhaseChanged); ok && ph.Phase == pushq.PhaseWaiting && !cancelledOnce {
+			cancel()
+			cancelledOnce = true
+		}
+		if d, ok := ev.(pushq.Done); ok {
+			finalErr = d.Err
+		}
+	}
+
+	if !cancelledOnce {
+		t.Fatal("bob never reached PhaseWaiting — test setup may be wrong")
+	}
+	if !errors.Is(finalErr, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", finalErr)
+	}
+
+	// Bob's entry must have been ejected from the queue.
+	entries, err := queue.ListEntries(bobClone.Path, "origin")
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.ID, "bob-") {
+			t.Fatalf("bob's entry should have been ejected after cancellation, but found: %v", e)
+		}
 	}
 }

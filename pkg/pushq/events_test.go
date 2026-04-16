@@ -57,6 +57,7 @@ func TestPush_EmitsDoneWithErrOnTestFailure(t *testing.T) {
 		TestCommand:   gittest.FailingTestCommand(),
 		CommitMessage: "add feature",
 		Username:      "alice",
+
 	}))
 
 	last := events[len(events)-1]
@@ -84,6 +85,7 @@ func TestPush_EmitsLogLinesFromTestCommand(t *testing.T) {
 		TestCommand:   "echo hello-from-test",
 		CommitMessage: "add feature",
 		Username:      "alice",
+
 	}))
 
 	var logLines []string
@@ -119,6 +121,7 @@ func TestPush_EmitsQueueStateWithOurEntryAfterJoining(t *testing.T) {
 		TestCommand:   gittest.PassingTestCommand(),
 		CommitMessage: "add feature",
 		Username:      "alice",
+
 	}))
 
 	found := false
@@ -138,6 +141,53 @@ func TestPush_EmitsQueueStateWithOurEntryAfterJoining(t *testing.T) {
 	}
 }
 
+// TestPush_LogLinesAllArrivedBeforeDone verifies that all LogLine events
+// appear in the channel before the Done event. This is the ordering invariant
+// stated in Done's doc comment ("always the last event emitted").
+//
+// Note: this test verifies the invariant holds and will always pass with the
+// sync.WaitGroup fix in place. Without that fix the test may not reliably fail
+// — the forwarding goroutine typically wins the race — but any failure would
+// correctly flag the bug.
+func TestPush_LogLinesAllArrivedBeforeDone(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+	clone.WriteFile("feature.txt", "hello")
+	clone.CommitAll("add feature")
+
+	// Drain the full channel (until close, not just until Done) so we can
+	// detect any LogLines that leak into the buffer after Done is sent.
+	var events []pushq.Event
+	for ev := range pushq.Push(context.Background(), pushq.PushOptions{
+		RepoPath:      clone.Path,
+		Remote:        "origin",
+		MainBranch:    "main",
+		TestCommand:   "echo line-1 && echo line-2 && echo line-3",
+		CommitMessage: "add feature",
+		Username:      "alice",
+
+	}) {
+		events = append(events, ev)
+	}
+
+	doneIdx := -1
+	for i, ev := range events {
+		if _, ok := ev.(pushq.Done); ok {
+			doneIdx = i
+			break
+		}
+	}
+	if doneIdx < 0 {
+		t.Fatal("no Done event received")
+	}
+
+	for i := doneIdx + 1; i < len(events); i++ {
+		if _, ok := events[i].(pushq.LogLine); ok {
+			t.Errorf("LogLine at index %d appeared after Done at index %d", i, doneIdx)
+		}
+	}
+}
+
 // TestPush_EmitsPhaseChangedEvents verifies that PhaseChanged events are
 // emitted and cover the expected phases for a single-developer push.
 func TestPush_EmitsPhaseChangedEvents(t *testing.T) {
@@ -153,6 +203,7 @@ func TestPush_EmitsPhaseChangedEvents(t *testing.T) {
 		TestCommand:   gittest.PassingTestCommand(),
 		CommitMessage: "add feature",
 		Username:      "alice",
+
 	}))
 
 	phases := make(map[pushq.Phase]bool)

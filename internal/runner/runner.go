@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/ezcdlabs/pushq/internal/gitenv"
 )
 
 // Result holds the outcome of a test command run.
@@ -64,11 +66,15 @@ func Run(ctx context.Context, command string, workDir string, lines chan<- strin
 }
 
 func buildCommand(ctx context.Context, command string) *exec.Cmd {
+	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		parts := strings.Fields(command)
-		return exec.CommandContext(ctx, parts[0], parts[1:]...)
+		cmd = exec.CommandContext(ctx, parts[0], parts[1:]...)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}
-	return exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Env = gitenv.Clean()
+	return cmd
 }
 
 func isExitError(err error) bool {
