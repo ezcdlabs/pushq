@@ -14,12 +14,13 @@ var gitInheritedVars = map[string]bool{
 	"GIT_PREFIX":    true,
 }
 
-// Clean returns a copy of os.Environ with git-context variables stripped.
+// Clean returns a copy of os.Environ with git-context variables stripped,
+// plus GIT_TERMINAL_PROMPT=0 to prevent git from blocking on credential prompts.
 // Use this as cmd.Env for any exec.Cmd that calls git, to avoid inheriting
 // GIT_DIR and friends when pushq is itself invoked as a git subcommand.
 func Clean() []string {
 	env := os.Environ()
-	out := make([]string, 0, len(env))
+	out := make([]string, 0, len(env)+1)
 	for _, e := range env {
 		key := e
 		if i := strings.IndexByte(e, '='); i >= 0 {
@@ -29,5 +30,6 @@ func Clean() []string {
 			out = append(out, e)
 		}
 	}
+	out = append(out, "GIT_TERMINAL_PROMPT=0")
 	return out
 }

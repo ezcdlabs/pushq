@@ -192,6 +192,10 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 		if pushErr == nil {
 			if shaErr == nil {
 				_ = queue.LandEntry(opts.RepoPath, opts.Remote, entryID, mainSHA)
+				// Advance local branch to the landed commit so it doesn't diverge
+				// from origin/main. The squash preserves file content, so the
+				// working tree already matches the new HEAD.
+				_ = git(opts.RepoPath, "update-ref", "refs/heads/"+opts.MainBranch, mainSHA)
 			} else {
 				_ = queue.RemoveEntry(opts.RepoPath, opts.Remote, entryID, "done")
 			}

@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/ezcdlabs/pushq/internal/gitenv"
 	"github.com/ezcdlabs/pushq/internal/protocol"
 	gogit "github.com/go-git/go-git/v5"
-	gogitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
@@ -219,6 +220,14 @@ func (sm *stateManager) updateStateBranch(repoPath, remote string, mutate func(m
 		if isFastForwardRejected(pushErr) {
 			continue // lost the race, retry
 		}
+		if isBrokenObjectError(pushErr) {
+			// The local state branch contains invalid git objects (created by an
+			// older version of pushq). Delete the local ref so the next iteration
+			// fetches a clean copy from the remote — or starts an orphan commit if
+			// the remote has no state branch yet.
+			_ = deleteLocalStateRef(repoPath)
+			continue
+		}
 		return fmt.Errorf("push state branch: %w", pushErr)
 	}
 }
@@ -257,11 +266,13 @@ func readStateBranchFiles(repo *gogit.Repository) (map[string][]byte, plumbing.H
 	return files, ref.Hash(), nil
 }
 
+// buildTree constructs a git tree from a flat map of slash-separated paths to
+// content. It creates proper nested sub-trees rather than flat entries with
+// slashes in the name, so the resulting objects pass GitHub's fsck checks
+// (fullPathname check via receive.fsckObjects).
 func buildTree(repo *gogit.Repository, files map[string][]byte) (plumbing.Hash, error) {
-	var entries []object.TreeEntry
-
+	blobs := make(map[string]plumbing.Hash, len(files))
 	for path, content := range files {
-		blob := &object.Blob{}
 		enc := repo.Storer.NewEncodedObject()
 		enc.SetType(plumbing.BlobObject)
 		w, err := enc.Writer()
@@ -272,16 +283,52 @@ func buildTree(repo *gogit.Repository, files map[string][]byte) (plumbing.Hash, 
 			return plumbing.ZeroHash, err
 		}
 		w.Close()
-		blobHash, err := repo.Storer.SetEncodedObject(enc)
+		h, err := repo.Storer.SetEncodedObject(enc)
 		if err != nil {
 			return plumbing.ZeroHash, err
 		}
-		_ = blob
+		blobs[path] = h
+	}
+	return buildNestedTree(repo, blobs, "")
+}
 
+// buildNestedTree recursively creates a git tree for all blob paths under prefix.
+func buildNestedTree(repo *gogit.Repository, blobs map[string]plumbing.Hash, prefix string) (plumbing.Hash, error) {
+	dirs := make(map[string]struct{})
+	var entries []object.TreeEntry
+
+	for path, h := range blobs {
+		rel := path
+		if prefix != "" {
+			if !strings.HasPrefix(path, prefix+"/") {
+				continue
+			}
+			rel = path[len(prefix)+1:]
+		}
+		if idx := strings.IndexByte(rel, '/'); idx >= 0 {
+			dirs[rel[:idx]] = struct{}{}
+		} else {
+			entries = append(entries, object.TreeEntry{
+				Name: rel,
+				Mode: 0100644,
+				Hash: h,
+			})
+		}
+	}
+
+	for dir := range dirs {
+		sub := dir
+		if prefix != "" {
+			sub = prefix + "/" + dir
+		}
+		h, err := buildNestedTree(repo, blobs, sub)
+		if err != nil {
+			return plumbing.ZeroHash, err
+		}
 		entries = append(entries, object.TreeEntry{
-			Name: path,
-			Mode: 0100644,
-			Hash: blobHash,
+			Name: dir,
+			Mode: 0040000,
+			Hash: h,
 		})
 	}
 
@@ -381,33 +428,53 @@ func readLandedFromLocal(repoPath string) (*LandedEntry, error) {
 }
 
 func fetchStateBranch(repoPath, remote string) error {
-	repo, err := gogit.PlainOpen(repoPath)
+	cmd := exec.Command("git", "fetch", remote, "+refs/pushq/state:refs/pushq/state")
+	cmd.Dir = repoPath
+	cmd.Env = gitenv.Clean()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		msg := string(out)
+		// State branch doesn't exist on the remote yet — treat as empty, not an error.
+		if strings.Contains(msg, "couldn't find remote ref") {
+			return nil
+		}
+		return fmt.Errorf("fetch state branch: %w\n%s", err, msg)
 	}
-	err = repo.Fetch(&gogit.FetchOptions{
-		RemoteName: remote,
-		RefSpecs:   []gogitconfig.RefSpec{"+refs/pushq/state:refs/pushq/state"},
-	})
-	if errors.Is(err, gogit.NoErrAlreadyUpToDate) {
-		return nil
-	}
-	return err
+	return nil
 }
 
 func pushStateBranch(repoPath, remote string) error {
+	cmd := exec.Command("git", "push", remote, "refs/pushq/state:refs/pushq/state")
+	cmd.Dir = repoPath
+	cmd.Env = gitenv.Clean()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w\n%s", err, out)
+	}
+	return nil
+}
+
+// isBrokenObjectError reports whether err indicates the remote rejected the
+// push because it received git objects that fail fsck (e.g. GitHub's
+// receive.fsckObjects check). This typically means the local state branch was
+// created by an older version of pushq that stored flat-tree entries with
+// slashes in their names. The recovery is to delete the local ref and retry
+// from scratch so the next commit has a clean ancestry.
+func deleteLocalStateRef(repoPath string) error {
 	repo, err := gogit.PlainOpen(repoPath)
 	if err != nil {
 		return err
 	}
-	err = repo.Push(&gogit.PushOptions{
-		RemoteName: remote,
-		RefSpecs:   []gogitconfig.RefSpec{"refs/pushq/state:refs/pushq/state"},
-	})
-	if errors.Is(err, gogit.NoErrAlreadyUpToDate) {
-		return nil
+	return repo.Storer.RemoveReference(plumbing.ReferenceName(stateBranch))
+}
+
+func isBrokenObjectError(err error) bool {
+	if err == nil {
+		return false
 	}
-	return err
+	msg := err.Error()
+	return strings.Contains(msg, "fullPathname") ||
+		strings.Contains(msg, "fsck error")
 }
 
 func isFastForwardRejected(err error) bool {
@@ -421,5 +488,6 @@ func isFastForwardRejected(err error) bool {
 	return strings.Contains(msg, "non-fast-forward") ||
 		strings.Contains(msg, "failed to update ref") ||
 		strings.Contains(msg, "reference already exists") ||
-		strings.Contains(msg, "incorrect old value provided")
+		strings.Contains(msg, "incorrect old value provided") ||
+		strings.Contains(msg, "[rejected]")
 }

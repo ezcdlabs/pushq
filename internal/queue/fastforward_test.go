@@ -24,6 +24,9 @@ func TestIsFastForwardRejected(t *testing.T) {
 		// wrapping should still match
 		{"push state branch: command error on refs/pushq/state: reference already exists", true},
 		{"push state branch: command error on refs/pushq/state: incorrect old value provided", true},
+		// git CLI rejection messages (git push --porcelain output)
+		{"exit status 1\n ! [rejected]        refs/pushq/state -> refs/pushq/state (fetch first)", true},
+		{"exit status 1\n ! [rejected]        refs/pushq/state -> refs/pushq/state (non-fast-forward)", true},
 		// non-retryable errors must not be swallowed
 		{"authentication required", false},
 		{"connection refused", false},
@@ -47,6 +50,31 @@ var retryScenarios = []struct {
 	{"failed to update ref", "failed to update ref"},
 	{"reference already exists", "reference already exists"},
 	{"incorrect old value provided", "incorrect old value provided"},
+}
+
+// TestIsBrokenObjectError documents the remote fsck error messages that indicate
+// the local state branch contains invalid git objects. When such an error is
+// received, the local ref must be deleted and the operation retried from scratch.
+func TestIsBrokenObjectError(t *testing.T) {
+	cases := []struct {
+		msg      string
+		expected bool
+	}{
+		// GitHub receive.fsckObjects rejection for flat-tree objects
+		{"remote: error: object abc: fullPathname: contains full pathnames\nremote: fatal: fsck error in packed object", true},
+		{"exit status 1\nremote: fatal: fsck error in packed object\nerror: remote unpack failed: index-pack failed", true},
+		// Not broken-object errors
+		{"[rejected]", false},
+		{"non-fast-forward update", false},
+		{"connection refused", false},
+		{"authentication required", false},
+	}
+	for _, c := range cases {
+		got := isBrokenObjectError(fmt.Errorf("%s", c.msg))
+		if got != c.expected {
+			t.Errorf("isBrokenObjectError(%q) = %v, want %v", c.msg, got, c.expected)
+		}
+	}
 }
 
 // TestUpdateStateBranch_RetriesOnKnownRejections verifies that the optimistic

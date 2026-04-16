@@ -1,6 +1,8 @@
 package queue_test
 
 import (
+	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/ezcdlabs/pushq/internal/gittest"
@@ -261,6 +263,42 @@ func TestListEntries_ReturnsEntriesInQueueOrder(t *testing.T) {
 	}
 	if entries[0].ID != "alice-100" || entries[1].ID != "bob-200" {
 		t.Fatalf("unexpected order: %v", entries)
+	}
+}
+
+// TestJoin_StateTreeHasNoFullPathnames verifies that the state branch tree uses
+// proper nested sub-trees rather than flat entries with slashes in the name.
+// GitHub enforces this via receive.fsckObjects and rejects pushes where any
+// tree entry name contains a slash ("fullPathname" check).
+func TestJoin_StateTreeHasNoFullPathnames(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+
+	if err := queue.Join(clone.Path, "origin", "alice-123", "refs/pushq/alice-123"); err != nil {
+		t.Fatalf("Join failed: %v", err)
+	}
+
+	// git ls-tree (without -r) lists only root-level entries.
+	// If buildTree is broken, the root tree will contain an entry named
+	// "entries/alice-123.json" (with a slash), which git fsck rejects.
+	cmd := exec.Command("git", "ls-tree", "refs/pushq/state")
+	cmd.Dir = remote.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git ls-tree failed: %v\n%s", err, out)
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		// Format: "<mode> <type> <hash>\t<name>"
+		if tab := strings.IndexByte(line, '\t'); tab >= 0 {
+			name := line[tab+1:]
+			if strings.Contains(name, "/") {
+				t.Errorf("root tree entry %q contains a slash — invalid tree object rejected by GitHub fsck", name)
+			}
+		}
 	}
 }
 

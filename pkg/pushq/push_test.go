@@ -3,6 +3,7 @@ package pushq_test
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,15 @@ import (
 	"github.com/ezcdlabs/pushq/internal/queue"
 	"github.com/ezcdlabs/pushq/pkg/pushq"
 )
+
+func gitRevParseTest(t *testing.T, repoPath, ref string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repoPath, "rev-parse", ref).Output()
+	if err != nil {
+		t.Fatalf("git rev-parse %s: %v", ref, err)
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // testClock creates a Fake clock and starts a background driver goroutine
 // that calls Advance(5s) whenever a timer is registered. This means any
@@ -126,12 +136,26 @@ func TestPush_SingleDeveloper_TestsPass_LandsOnMain(t *testing.T) {
 		}
 	}
 	if stateExists {
-		// If the state branch exists, alice's entry file must not be in its tree.
-		// We don't know the exact entry-id, so we check there are no entry files.
-		_, found := remote.ReadFileAtRef("refs/pushq/state", "entries")
-		if found {
-			t.Fatal("expected no entry files in state branch tree after completion")
+		// If the state branch exists there must be no active entries — alice's
+		// entry file should have been removed on landing. Use the queue API rather
+		// than ReadFileAtRef, because the nested-tree layout means "entries" now
+		// resolves as a directory and would always appear to exist.
+		entries, _, err := queue.ReadState(clone.Path, "origin")
+		if err != nil {
+			t.Fatalf("ReadState failed: %v", err)
 		}
+		if len(entries) != 0 {
+			t.Fatalf("expected no active entries in state branch after completion, got: %v", entries)
+		}
+	}
+
+	// Local main must be advanced to origin/main after landing — the squash
+	// commit replaces the individual commits, so the local branch must not
+	// diverge from the remote.
+	localMain := gitRevParseTest(t, clone.Path, "main")
+	originMain := gitRevParseTest(t, clone.Path, "origin/main")
+	if localMain != originMain {
+		t.Fatalf("local main (%s) diverged from origin/main (%s) after push — local branch not advanced", localMain[:8], originMain[:8])
 	}
 }
 
