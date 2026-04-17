@@ -25,3 +25,13 @@ jobs:
 
       - run: go vet ./...
       - run: go test ./... -timeout 120s
+
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run integration tests
+        run: |
+          docker compose -f test/integration/docker-compose.yml run --rm client
