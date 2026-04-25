@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ezcdlabs/pushq/pkg/pushq"
@@ -16,6 +17,8 @@ var (
 	colorGreen = lipgloss.Color("2")
 	colorGray  = lipgloss.Color("8")
 )
+
+var spinnerFrames = []string{"⠴", "⠦", "⠧", "⠇", "⠏", "⠋", "⠙", "⠹", "⠸", "⠼"}
 
 // PushSession is the contract between the display layer and the push library.
 // Start returns a channel of events that ends with a Done event. Cancel
@@ -83,39 +86,58 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 	var entries []pushq.EntryRecord
 	var landed string
 	var finalErr error
+	spinnerIdx := 0
+	joined := false
 
-	printer := &snapshotPrinter{out: out, inPlace: !verbose && isTerminal(out)}
+	inPlace := !verbose && isTerminal(out)
+	printer := &snapshotPrinter{out: out, inPlace: inPlace}
 
 	printSnapshot := func() {
-		if len(entries) == 0 {
-			printer.print("\n" + renderJoining() + "\n")
+		if !joined {
+			printer.print("\n" + renderJoining(spinnerIdx) + "\n")
 		} else {
-			printer.print("\n" + renderJoined() + "\n\nQueue\n" + RenderQueueState(entries, username, landed))
+			printer.print("\n" + renderJoined() + "\n\nQueue\n" + RenderQueueState(entries, username, landed, spinnerIdx))
 		}
 	}
 
-	for ev := range session.Start() {
-		switch e := ev.(type) {
-		case pushq.PhaseChanged:
-			printSnapshot()
-		case pushq.QueueStateChanged:
-			entries = e.Entries
-			landed = e.Landed
-			printSnapshot()
-		case pushq.LogLine:
-			if verbose {
-				fmt.Fprintln(out, e.Text)
+	var tickCh <-chan time.Time
+	if inPlace {
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		tickCh = ticker.C
+	}
+
+	eventCh := session.Start()
+	for {
+		select {
+		case ev, ok := <-eventCh:
+			if !ok {
+				return finalErr
 			}
-		case pushq.Done:
-			finalErr = e.Err
+			switch e := ev.(type) {
+			case pushq.PhaseChanged:
+				printSnapshot()
+			case pushq.QueueStateChanged:
+				joined = true
+				entries = e.Entries
+				landed = e.Landed
+				printSnapshot()
+			case pushq.LogLine:
+				if verbose {
+					fmt.Fprintln(out, e.Text)
+				}
+			case pushq.Done:
+				finalErr = e.Err
+			}
+		case <-tickCh:
+			spinnerIdx++
+			printSnapshot()
 		}
 	}
-
-	return finalErr
 }
 
-func renderJoining() string {
-	spinner := lipgloss.NewStyle().Foreground(colorCyan).Render("⠴")
+func renderJoining(spinnerIdx int) string {
+	spinner := lipgloss.NewStyle().Foreground(colorCyan).Render(spinnerFrames[spinnerIdx%len(spinnerFrames)])
 	return spinner + " joining queue"
 }
 
@@ -129,7 +151,7 @@ func renderJoined() string {
 // bottom) so the display reads like git log — newest above, oldest below.
 // Entries belonging to username are marked with ">". If landed is non-empty it
 // is rendered as the bottom row representing the most recently landed commit.
-func RenderQueueState(entries []pushq.EntryRecord, username string, landed string) string {
+func RenderQueueState(entries []pushq.EntryRecord, username string, landed string, spinnerIdx int) string {
 	var sb strings.Builder
 
 	ownPrefix := username + "-"
@@ -142,7 +164,7 @@ func RenderQueueState(entries []pushq.EntryRecord, username string, landed strin
 			marker = lipgloss.NewStyle().Foreground(colorCyan).Render("> ")
 		}
 
-		icon := EntryIcon(e.Status)
+		icon := EntryIcon(e.Status, spinnerIdx)
 
 		idStyle := lipgloss.NewStyle()
 		if isOwn {
@@ -163,11 +185,12 @@ func RenderQueueState(entries []pushq.EntryRecord, username string, landed strin
 	return sb.String()
 }
 
-// EntryIcon returns the status icon for a queue entry.
-func EntryIcon(status string) string {
+// EntryIcon returns the status icon for a queue entry, using spinnerIdx to
+// select the current animation frame for active entries.
+func EntryIcon(status string, spinnerIdx int) string {
 	switch status {
 	case "testing":
-		return lipgloss.NewStyle().Foreground(colorCyan).Render("⠴")
+		return lipgloss.NewStyle().Foreground(colorCyan).Render(spinnerFrames[spinnerIdx%len(spinnerFrames)])
 	case "done":
 		return lipgloss.NewStyle().Foreground(colorGreen).Render("✔")
 	default:

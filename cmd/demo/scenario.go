@@ -98,6 +98,9 @@ var happyPath = Scenario{
 			{ID: idYou, Status: "testing"},
 		}, Landed: bobLanded}, 1200 * time.Millisecond},
 
+		// you landed — queue is empty, your commit is now the landed entry
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{}, Landed: "c3d4e5f add auth endpoint"}, 300 * time.Millisecond},
+
 		// done
 		{pushq.Done{}, 0},
 	},
