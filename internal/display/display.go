@@ -23,6 +23,22 @@ var (
 
 var spinnerFrames = []string{"⠴", "⠦", "⠧", "⠇", "⠏", "⠋", "⠙", "⠹", "⠸", "⠼"}
 
+// SquashCommit is a pending commit shown in the SQUASH section.
+type SquashCommit struct {
+	Hash    string
+	Subject string
+}
+
+// PrintSquash writes the SQUASH section to w: header, commit list, and message
+// prompt. The caller reads the user's reply immediately after this returns.
+func PrintSquash(w io.Writer, commits []SquashCommit, defaultMsg string) {
+	fmt.Fprint(w, "\n"+RenderSectionHeader("SQUASH"))
+	for _, c := range commits {
+		fmt.Fprintf(w, "  %s  %s\n", c.Hash, c.Subject)
+	}
+	fmt.Fprintf(w, "\n  Commit message [%s]: ", defaultMsg)
+}
+
 // PushSession is the contract between the display layer and the push library.
 // Start returns a channel of events that ends with a Done event. Cancel
 // triggers a graceful self-ejection.
@@ -81,11 +97,10 @@ func isTerminal(w io.Writer) bool {
 	return stat.Mode()&os.ModeCharDevice != 0
 }
 
-// RunInline processes push events and writes progress to out. While joining,
-// a single status line is shown. Once queue state is received, a "joined" +
-// Queue block is rendered and updated in-place on each change. Test output is
-// suppressed unless verbose is true. nowFn provides the current time for
-// elapsed calculations; when nil it defaults to time.Now.
+// RunInline processes push events and writes progress to out. Renders a QUEUE
+// section (in-place when terminal) and a RESULT section on completion. Test
+// output is suppressed unless verbose is true. nowFn provides the current time
+// for elapsed calculations; when nil it defaults to time.Now.
 func RunInline(session PushSession, out io.Writer, username string, verbose bool, nowFn func() time.Time) error {
 	if nowFn == nil {
 		nowFn = time.Now
@@ -93,6 +108,7 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 	var entries []pushq.EntryRecord
 	var landed *pushq.EntryRecord
 	var finalErr error
+	var done bool
 	spinnerIdx := 0
 	joined := false
 
@@ -112,11 +128,24 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 
 	printSnapshot := func() {
 		now := nowFn()
+		var sb strings.Builder
+		sb.WriteString("\n")
+		sb.WriteString(RenderSectionHeader("QUEUE"))
 		if !joined {
-			printer.print("\n" + renderJoining(spinnerIdx) + "\n")
+			sb.WriteString(renderJoiningLine(spinnerIdx))
 		} else {
-			printer.print("\n" + renderJoined() + "\n\nQueue\n" + RenderQueueState(entries, username, landed, spinnerIdx, now, termWidth()))
+			sb.WriteString(RenderQueueState(entries, username, landed, spinnerIdx, now, termWidth()))
 		}
+		if done {
+			sb.WriteString("\n")
+			sb.WriteString(RenderSectionHeader("RESULT"))
+			if finalErr != nil {
+				sb.WriteString(renderResultLine("✗", errorSummary(finalErr), colorRed))
+			} else {
+				sb.WriteString(renderResultLine("✔", "landed", colorGreen))
+			}
+		}
+		printer.print(sb.String())
 	}
 
 	var tickCh <-chan time.Time
@@ -148,7 +177,9 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 			case pushq.Note:
 				fmt.Fprintln(out, e.Text)
 			case pushq.Done:
+				done = true
 				finalErr = e.Err
+				printSnapshot()
 			}
 		case <-tickCh:
 			spinnerIdx++
@@ -157,14 +188,28 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 	}
 }
 
-func renderJoining(spinnerIdx int) string {
-	spinner := lipgloss.NewStyle().Foreground(colorCyan).Render(spinnerFrames[spinnerIdx%len(spinnerFrames)])
-	return spinner + " joining queue"
+// RenderSectionHeader returns a styled bold section label for use in the
+// inline display. Exported so callers outside the display package can render
+// consistent headers for sections they own (e.g. SQUASH in the CLI).
+func RenderSectionHeader(label string) string {
+	return lipgloss.NewStyle().Bold(true).Render(label) + "\n"
 }
 
-func renderJoined() string {
-	check := lipgloss.NewStyle().Foreground(colorGreen).Render("✔")
-	return check + " joined"
+func renderJoiningLine(spinnerIdx int) string {
+	spinner := lipgloss.NewStyle().Foreground(colorCyan).Render(spinnerFrames[spinnerIdx%len(spinnerFrames)])
+	return "  " + spinner + " joining...\n"
+}
+
+func renderResultLine(icon, text string, color lipgloss.Color) string {
+	return "  " + lipgloss.NewStyle().Foreground(color).Render(icon) + "  " + text + "\n"
+}
+
+func errorSummary(err error) string {
+	msg := err.Error()
+	if i := strings.Index(msg, "\n"); i > 0 {
+		return msg[:i]
+	}
+	return msg
 }
 
 // RenderQueueState returns a formatted string of queue entries. Entries are

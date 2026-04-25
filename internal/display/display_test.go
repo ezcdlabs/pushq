@@ -1,6 +1,7 @@
 package display
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -227,29 +228,24 @@ func TestRunInline_JoiningPhase_ShowsJoiningStatus(t *testing.T) {
 	}
 }
 
-func TestRunInline_AfterJoining_ShowsJoinedHeader(t *testing.T) {
+func TestRunInline_ShowsQueueSectionHeader(t *testing.T) {
 	session := &fakeSession{events: []pushq.Event{
 		pushq.PhaseChanged{Phase: pushq.PhaseJoining},
-		pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: "alice-100-add-feature", Author: "alice", Message: "add feature", Status: "testing"},
-		}},
 		pushq.Done{},
 	}}
 
 	var buf strings.Builder
 	RunInline(session, &buf, "alice", false, nil)
 
-	out := buf.String()
-	if !strings.Contains(out, "joined") {
-		t.Errorf("expected 'joined' in output after receiving queue state:\n%s", out)
+	if !strings.Contains(buf.String(), "QUEUE") {
+		t.Errorf("expected 'QUEUE' section header in output:\n%s", buf.String())
 	}
 }
 
-func TestRunInline_AfterJoining_ShowsQueueHeader(t *testing.T) {
+func TestRunInline_ShowsResultSection_OnSuccess(t *testing.T) {
 	session := &fakeSession{events: []pushq.Event{
-		pushq.PhaseChanged{Phase: pushq.PhaseJoining},
 		pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: "alice-100-add-feature", Author: "alice", Message: "add feature", Status: "testing"},
+			{ID: "alice-100-x", Author: "alice", Message: "add feature", Status: "testing"},
 		}},
 		pushq.Done{},
 	}}
@@ -258,8 +254,28 @@ func TestRunInline_AfterJoining_ShowsQueueHeader(t *testing.T) {
 	RunInline(session, &buf, "alice", false, nil)
 
 	out := buf.String()
-	if !strings.Contains(out, "Queue") {
-		t.Errorf("expected 'Queue' header in output after joining:\n%s", out)
+	if !strings.Contains(out, "RESULT") {
+		t.Errorf("expected 'RESULT' section in output on success:\n%s", out)
+	}
+	if !strings.Contains(out, "landed") {
+		t.Errorf("expected 'landed' in RESULT section on success:\n%s", out)
+	}
+}
+
+func TestRunInline_ShowsResultSection_OnFailure(t *testing.T) {
+	session := &fakeSession{events: []pushq.Event{
+		pushq.Done{Err: errors.New("tests failed")},
+	}}
+
+	var buf strings.Builder
+	RunInline(session, &buf, "alice", false, nil)
+
+	out := buf.String()
+	if !strings.Contains(out, "RESULT") {
+		t.Errorf("expected 'RESULT' section in output on failure:\n%s", out)
+	}
+	if !strings.Contains(out, "tests failed") {
+		t.Errorf("expected error text in RESULT section:\n%s", out)
 	}
 }
 

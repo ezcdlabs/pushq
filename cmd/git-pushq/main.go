@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-"github.com/ezcdlabs/pushq/config"
+	"github.com/ezcdlabs/pushq/config"
 	"github.com/ezcdlabs/pushq/internal/display"
 	"github.com/ezcdlabs/pushq/pkg/pushq"
 )
@@ -66,12 +66,12 @@ func run() error {
 	}
 
 	// 5. Show commits and prompt for a single squash message.
-	fmt.Println("\nCommits to push:")
-	for _, c := range pending {
-		fmt.Printf("  %s  %s\n", c.Hash[:8], c.Subject)
-	}
 	defaultMsg := pending[len(pending)-1].Subject
-	fmt.Printf("\nCommit message [%s]: ", defaultMsg)
+	squashCommits := make([]display.SquashCommit, len(pending))
+	for i, c := range pending {
+		squashCommits[i] = display.SquashCommit{Hash: c.Hash[:8], Subject: c.Subject}
+	}
+	display.PrintSquash(os.Stdout, squashCommits, defaultMsg)
 	message, err := readLine()
 	if err != nil {
 		return err
@@ -104,17 +104,16 @@ func run() error {
 
 	verbose := len(os.Args) > 1 && os.Args[1] == "--verbose"
 
-	if err := display.RunInline(session, os.Stdout, username, verbose, nil); err != nil {
-		fmt.Fprintf(os.Stderr, "\nfailed: %v\n", err)
+	err = display.RunInline(session, os.Stdout, username, verbose, nil)
+	if err != nil {
 		if stashed {
-			fmt.Fprintln(os.Stderr, "Your changes are still stashed. Run 'git stash pop' to restore.")
+			fmt.Fprintln(os.Stderr, "\nYour changes are still stashed. Run 'git stash pop' to restore.")
 		}
 		return err
 	}
 
-	fmt.Println("\nlanded.")
 	if stashed {
-		fmt.Println("Restoring stashed changes...")
+		fmt.Println("\nRestoring stashed changes...")
 		if err := pushq.StashPop(repoPath); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: stash pop failed: %v\nRun 'git stash pop' manually.\n", err)
 		}

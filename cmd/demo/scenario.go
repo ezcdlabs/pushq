@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/ezcdlabs/pushq/internal/display"
 	"github.com/ezcdlabs/pushq/pkg/pushq"
 )
 
@@ -32,12 +33,13 @@ type Frame struct {
 
 // Scenario is a named sequence used for demo recording and screenshots.
 type Scenario struct {
-	Name       string
-	Prelude    []PreludeLine
-	Frames     []Frame
-	Verbose    bool   // show test log output
-	SuccessMsg string // printed on clean exit; default "\nlanded."
-	FailureMsg string // printed on error exit; default "\nfailed: <err>"
+	Name          string
+	Prelude       []PreludeLine // shell prompt + command only
+	Commits       []display.SquashCommit
+	DefaultMsg    string
+	CommitMessage string // what the "user" types at the prompt
+	Frames        []Frame
+	Verbose       bool // show test log output
 }
 
 // fixed join/land times for the demo — stable across runs.
@@ -89,19 +91,22 @@ func withStatus(r pushq.EntryRecord, status string) pushq.EntryRecord {
 	return r
 }
 
+var sharedPrelude = []PreludeLine{
+	{Text: shellPrompt("you", "workstation", "~/Projects/your-project"), Delay: 400 * time.Millisecond, NoNewline: true},
+	{Text: "git pushq", Delay: 300 * time.Millisecond, Typing: true},
+}
+
+var sharedCommits = []display.SquashCommit{
+	{Hash: "a1b2c3d", Subject: "add user auth endpoint"},
+	{Hash: "e4f5a6b", Subject: "fix token expiry bug"},
+}
+
 var happyPath = Scenario{
-	Name: "happy-path",
-	Prelude: []PreludeLine{
-		{Text: shellPrompt("you", "workstation", "~/Projects/your-project"), Delay: 400 * time.Millisecond, NoNewline: true},
-		{Text: "git pushq", Delay: 300 * time.Millisecond, Typing: true},
-		{Text: "", Delay: 200 * time.Millisecond},
-		{Text: "Commits to push:", Delay: 200 * time.Millisecond},
-		{Text: "  a1b2c3d  add user auth endpoint", Delay: 60 * time.Millisecond},
-		{Text: "  e4f5a6b  fix token expiry bug", Delay: 60 * time.Millisecond},
-		{Text: "", Delay: 400 * time.Millisecond},
-		{Text: "Commit message [fix token expiry bug]: ", Delay: 300 * time.Millisecond, NoNewline: true},
-		{Text: "add auth endpoint", Delay: 100 * time.Millisecond, Typing: true},
-	},
+	Name:          "happy-path",
+	Prelude:       sharedPrelude,
+	Commits:       sharedCommits,
+	DefaultMsg:    "fix token expiry bug",
+	CommitMessage: "add auth endpoint",
 	Frames: []Frame{
 		// joining: carol and bob are already in the queue ahead of you
 		{pushq.PhaseChanged{Phase: pushq.PhaseJoining}, 800 * time.Millisecond},
@@ -148,9 +153,11 @@ var happyPath = Scenario{
 }
 
 var testFailure = Scenario{
-	Name:       "test-failure",
-	FailureMsg: "\nfailed: tests failed.",
-	Prelude:    happyPath.Prelude,
+	Name:          "test-failure",
+	Prelude:       sharedPrelude,
+	Commits:       sharedCommits,
+	DefaultMsg:    "fix token expiry bug",
+	CommitMessage: "add auth endpoint",
 	Frames: []Frame{
 		// joining: carol is ahead, no bob
 		{pushq.PhaseChanged{Phase: pushq.PhaseJoining}, 800 * time.Millisecond},
@@ -184,9 +191,11 @@ var testFailure = Scenario{
 }
 
 var aheadEjected = Scenario{
-	Name:    "ahead-ejected",
-	Verbose: false,
-	Prelude: happyPath.Prelude,
+	Name:          "ahead-ejected",
+	Prelude:       sharedPrelude,
+	Commits:       sharedCommits,
+	DefaultMsg:    "fix token expiry bug",
+	CommitMessage: "add auth endpoint",
 	Frames: []Frame{
 		// joining: bob is ahead of you
 		{pushq.PhaseChanged{Phase: pushq.PhaseJoining}, 800 * time.Millisecond},

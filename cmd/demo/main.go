@@ -77,31 +77,27 @@ func playScenario(s *Scenario) error {
 		}
 	}
 
+	// Phase 2: print the SQUASH section using the same display code as the real CLI.
+	display.PrintSquash(os.Stdout, s.Commits, s.DefaultMsg)
+	time.Sleep(300 * time.Millisecond)
+	for i, ch := range []rune(s.CommitMessage) {
+		fmt.Print(string(ch))
+		if i < len([]rune(s.CommitMessage))-1 {
+			time.Sleep(45 * time.Millisecond)
+		}
+	}
+	fmt.Println()
+
 	time.Sleep(400 * time.Millisecond)
 
-	// Phase 2: run events through the real display code.
+	// Phase 3: run events through the real display code.
 	// nowFn advances virtual time from demoBase in lockstep with real elapsed
 	// time so that elapsed timers in the demo show realistic durations.
 	scenarioStart := time.Now()
 	nowFn := func() time.Time { return demoBase.Add(time.Since(scenarioStart)) }
 
 	session := &scenarioSession{frames: s.Frames}
-	err := display.RunInline(session, os.Stdout, "you", s.Verbose, nowFn)
-
-	// Phase 3: post-session output.
+	display.RunInline(session, os.Stdout, "you", s.Verbose, nowFn) //nolint:errcheck
 	time.Sleep(200 * time.Millisecond)
-	if err != nil {
-		msg := s.FailureMsg
-		if msg == "" {
-			msg = fmt.Sprintf("\nfailed: %v", err)
-		}
-		fmt.Println(msg)
-	} else {
-		msg := s.SuccessMsg
-		if msg == "" {
-			msg = "\nlanded."
-		}
-		fmt.Println(msg)
-	}
 	return nil
 }
