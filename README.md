@@ -1,6 +1,6 @@
 # pushq (`git pushq`)
 
-![demo](assets/happy-path.gif)
+<img src="assets/happy-path.gif" width="700">
 
 Serverless push queue for trunk-based development. Test your commits against everyone ahead of you in the queue — on your own machine, in parallel, before anything touches main. No server, no PRs, no merge queue service. Just git refs.
 

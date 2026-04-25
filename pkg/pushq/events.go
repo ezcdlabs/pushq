@@ -1,5 +1,15 @@
 package pushq
 
+import (
+	"fmt"
+	"time"
+)
+
+// EntryID returns the queue entry identifier for a given username and join time.
+func EntryID(username string, t time.Time) string {
+	return username + "-" + fmt.Sprintf("%d", t.UnixMilli())
+}
+
 // Event is the sealed interface for all events emitted by Push.
 type Event interface {
 	sealedEvent()

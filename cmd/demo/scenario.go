@@ -4,6 +4,15 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/ezcdlabs/pushq/pkg/pushq"
+)
+
+// fixed join times for the demo — stable across runs.
+var (
+	demoBase  = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
+	idYou     = pushq.EntryID("you", demoBase)
+	idBob     = pushq.EntryID("bob", demoBase.Add(-90*time.Second))
+	idCarol   = pushq.EntryID("carol", demoBase.Add(-3*time.Minute))
 )
 
 // shellPrompt renders a Ubuntu-style coloured bash prompt.
@@ -46,16 +55,16 @@ var happyPath = Scenario{
 		{Text: "  e4f5a6b  fix token expiry bug", Delay: 60 * time.Millisecond},
 		{Text: "", Delay: 400 * time.Millisecond},
 		{Text: "Commit message [fix token expiry bug]: ", Delay: 300 * time.Millisecond, NoNewline: true},
-		{Text: "add user authentication with token expiry fix", Delay: 100 * time.Millisecond, Typing: true},
+		{Text: "add auth endpoint", Delay: 100 * time.Millisecond, Typing: true},
 	},
 	Frames: []Frame{
 		{
 			Screen: screen{
 				phase: "joining",
 				entries: []entry{
-					{name: "you/add-auth", status: statusTesting, isYou: true},
-					{name: "bob/fix-navbar", status: statusWaiting},
-					{name: "carol/update-deps", status: statusWaiting},
+					{name: idYou, status: statusTesting, isYou: true},
+					{name: idBob, status: statusWaiting},
+					{name: idCarol, status: statusWaiting},
 				},
 				panelLines: []string{
 					"  > go test ./...",
@@ -68,9 +77,9 @@ var happyPath = Scenario{
 			Screen: screen{
 				phase: "running tests  (1 / 3)",
 				entries: []entry{
-					{name: "you/add-auth", status: statusTesting, isYou: true},
-					{name: "bob/fix-navbar", status: statusWaiting},
-					{name: "carol/update-deps", status: statusWaiting},
+					{name: idYou, status: statusTesting, isYou: true},
+					{name: idBob, status: statusWaiting},
+					{name: idCarol, status: statusWaiting},
 				},
 				panelLines: []string{
 					"  > go test ./...",
@@ -84,9 +93,9 @@ var happyPath = Scenario{
 			Screen: screen{
 				phase: "running tests  (1 / 3)",
 				entries: []entry{
-					{name: "you/add-auth", status: statusTesting, isYou: true},
-					{name: "bob/fix-navbar", status: statusWaiting},
-					{name: "carol/update-deps", status: statusWaiting},
+					{name: idYou, status: statusTesting, isYou: true},
+					{name: idBob, status: statusWaiting},
+					{name: idCarol, status: statusWaiting},
 				},
 				panelLines: []string{
 					"  > go test ./...",
@@ -102,9 +111,9 @@ var happyPath = Scenario{
 			Screen: screen{
 				phase: "running tests  (1 / 3)",
 				entries: []entry{
-					{name: "you/add-auth", status: statusTesting, isYou: true},
-					{name: "bob/fix-navbar", status: statusWaiting},
-					{name: "carol/update-deps", status: statusWaiting},
+					{name: idYou, status: statusTesting, isYou: true},
+					{name: idBob, status: statusWaiting},
+					{name: idCarol, status: statusWaiting},
 				},
 				panelLines: []string{
 					"  > go test ./...",
@@ -120,11 +129,11 @@ var happyPath = Scenario{
 		},
 		{
 			Screen: screen{
-				phase: "waiting for bob/fix-navbar  (2 / 3)",
+				phase: "waiting for " + idBob + "  (2 / 3)",
 				entries: []entry{
-					{name: "bob/fix-navbar", status: statusTesting},
-					{name: "you/add-auth", status: statusPassed, isYou: true},
-					{name: "carol/update-deps", status: statusWaiting},
+					{name: idBob, status: statusTesting},
+					{name: idYou, status: statusPassed, isYou: true},
+					{name: idCarol, status: statusWaiting},
 				},
 				panelLines: []string{
 					"  > go test ./...",
@@ -134,7 +143,7 @@ var happyPath = Scenario{
 					"  ok   github.com/acme/app/db     2.001s",
 					"",
 					"  All tests passed.",
-					"  Waiting for bob/fix-navbar...",
+					"  Waiting for " + idBob + "...",
 				},
 			},
 			Hold: 2200 * time.Millisecond,
@@ -143,8 +152,8 @@ var happyPath = Scenario{
 			Screen: screen{
 				phase: "landing  (1 / 2)",
 				entries: []entry{
-					{name: "you/add-auth", status: statusLanding, isYou: true},
-					{name: "carol/update-deps", status: statusWaiting},
+					{name: idYou, status: statusLanding, isYou: true},
+					{name: idCarol, status: statusWaiting},
 				},
 				panelLines: []string{
 					"  > go test ./...",
@@ -164,13 +173,13 @@ var happyPath = Scenario{
 			Screen: screen{
 				phase: "landed",
 				entries: []entry{
-					{name: "you/add-auth", status: statusLanded, isYou: true},
-					{name: "carol/update-deps", status: statusWaiting},
+					{name: idYou, status: statusLanded, isYou: true},
+					{name: idCarol, status: statusWaiting},
 				},
 				panelLines: []string{
 					"  Landed on main.",
 					"",
-					"  a1b2c3d  add user authentication with token expiry fix",
+					"  a1b2c3d  add auth endpoint",
 				},
 			},
 			Hold: 2000 * time.Millisecond,

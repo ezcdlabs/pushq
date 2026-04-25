@@ -20,7 +20,7 @@ mkdir -p assets
 
 go build -o /tmp/pushq-demo ./cmd/demo
 
-asciinema rec --overwrite --command "/tmp/pushq-demo --play ${SCENARIO}" "$CAST"
+asciinema rec --overwrite --cols 160 --rows 25 --command "/tmp/pushq-demo --play ${SCENARIO}" "$CAST"
 agg "$CAST" "$GIF"
 rm "$CAST"
 
