@@ -1,5 +1,6 @@
 # Build output
 /git-pushq
+/demo
 *.exe
 dist/
 
@@ -10,6 +11,9 @@ dist/
 # Go workspace (local only)
 go.work
 go.work.sum
+
+# Demo recording intermediates
+*.cast
 
 # OS
 .DS_Store

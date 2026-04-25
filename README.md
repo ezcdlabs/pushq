@@ -1,5 +1,7 @@
 # pushq (`git pushq`)
 
+![demo](assets/happy-path.gif)
+
 Serverless push queue for trunk-based development. Test your commits against everyone ahead of you in the queue — on your own machine, in parallel, before anything touches main. No server, no PRs, no merge queue service. Just git refs.
 
 ---
@@ -360,6 +362,33 @@ for {
     }
     // lost the race, retry
 }
+```
+
+### Recording demos
+
+`cmd/demo` is an interactive design browser and scenario player for the TUI. It is completely standalone — no git server or real push queue needed.
+
+**Interactive browser** (step through all design states with arrow keys):
+
+```sh
+go run ./cmd/demo
+```
+
+**Scenario playback** (auto-plays a scripted narrative end-to-end):
+
+```sh
+go run ./cmd/demo --play happy-path
+```
+
+**Recording a GIF** with [asciinema](https://asciinema.org) and [agg](https://github.com/asciinema/agg):
+
+```sh
+# install dependencies
+pip install asciinema           # (or: sudo apt install asciinema)
+curl -sL https://github.com/asciinema/agg/releases/latest/download/agg-x86_64-unknown-linux-gnu -o ~/.local/bin/agg && chmod +x ~/.local/bin/agg
+
+./scripts/record-demo.sh
+# → assets/happy-path.gif
 ```
 
 ---

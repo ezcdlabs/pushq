@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -48,10 +49,11 @@ type screen struct {
 	panelLines []string // right panel content
 }
 
+// screens is the full catalogue used by the interactive browser.
 var screens = []screen{
 	// D1 — commit review
 	{
-		phase:  "review commits",
+		phase: "review commits",
 		entries: []entry{
 			{name: "a1b2c3d  add user auth endpoint", status: statusWaiting},
 			{name: "e4f5a6b  fix token expiry bug", status: statusWaiting},
@@ -151,7 +153,7 @@ var screens = []screen{
 	},
 	// D6 — test failure
 	{
-		phase:  "tests failed",
+		phase: "tests failed",
 		entries: []entry{
 			{name: "you/add-auth", status: statusFailed, isYou: true},
 			{name: "bob/fix-navbar", status: statusWaiting},
@@ -169,7 +171,7 @@ var screens = []screen{
 	},
 	// D7 — conflict
 	{
-		phase:  "conflict",
+		phase: "conflict",
 		entries: []entry{
 			{name: "you/add-auth", status: statusConflict, isYou: true},
 			{name: "bob/fix-navbar", status: statusTesting},
@@ -289,38 +291,66 @@ func renderRightPanel(lines []string, w, h int, accent lipgloss.Color) string {
 
 // --- Bubble Tea model --------------------------------------------------------
 
-type model struct {
-	index  int
-	width  int
-	height int
+// advanceMsg is sent by the autoplay timer to move to the next frame.
+type advanceMsg struct{}
+
+func scheduleAdvance(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return advanceMsg{} })
 }
 
-func (m model) Init() tea.Cmd { return nil }
+type model struct {
+	screens  []screen        // frames to render (interactive: all screens; autoplay: scenario frames)
+	delays   []time.Duration // per-frame hold duration; only used in autoplay mode
+	autoplay bool
+	index    int
+	width    int
+	height   int
+}
+
+func (m model) Init() tea.Cmd {
+	if m.autoplay && len(m.delays) > 0 {
+		return scheduleAdvance(m.delays[0])
+	}
+	return nil
+}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "right", "l":
-			m.index = (m.index + 1) % len(screens)
+			if !m.autoplay {
+				m.index = (m.index + 1) % len(m.screens)
+			}
 		case "left", "h":
-			m.index = (m.index - 1 + len(screens)) % len(screens)
+			if !m.autoplay {
+				m.index = (m.index - 1 + len(m.screens)) % len(m.screens)
+			}
 		}
+
+	case advanceMsg:
+		m.index++
+		if m.index >= len(m.screens) {
+			return m, tea.Quit
+		}
+		return m, scheduleAdvance(m.delays[m.index])
 	}
+
 	return m, nil
 }
 
 func (m model) View() string {
-	if m.width == 0 {
+	if m.width == 0 || m.index >= len(m.screens) {
 		return ""
 	}
 
-	s := screens[m.index]
+	s := m.screens[m.index]
 	w := m.width
 
 	// derive accent colour from your entry's state
@@ -370,16 +400,75 @@ func (m model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, body)
 }
 
-func padBetween(left, right string, w int) string {
-	gap := w - len(left) - len(right)
-	if gap < 1 {
-		gap = 1
+// --- scenario playback -------------------------------------------------------
+
+func playScenario(s *Scenario) error {
+	// Phase 1: print the prelude to the normal terminal (pre-TUI output).
+	for _, line := range s.Prelude {
+		time.Sleep(line.Delay)
+		if line.Typing {
+			for i, ch := range []rune(line.Text) {
+				fmt.Print(string(ch))
+				if i < len([]rune(line.Text))-1 {
+					time.Sleep(45 * time.Millisecond)
+				}
+			}
+			fmt.Println()
+		} else if line.NoNewline {
+			fmt.Print(line.Text)
+		} else {
+			fmt.Println(line.Text)
+		}
 	}
-	return left + strings.Repeat(" ", gap) + right
+
+	time.Sleep(400 * time.Millisecond)
+
+	// Phase 2: run the TUI with the scenario's frames on an auto-advance timer.
+	var scr []screen
+	var delays []time.Duration
+	for _, f := range s.Frames {
+		scr = append(scr, f.Screen)
+		delays = append(delays, f.Hold)
+	}
+
+	m := model{screens: scr, delays: delays, autoplay: true}
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		return err
+	}
+
+	// Phase 3: post-TUI output (alt-screen restores the prelude, then we append).
+	time.Sleep(200 * time.Millisecond)
+	fmt.Println("\nlanded.")
+	return nil
 }
 
+// --- entry point -------------------------------------------------------------
+
 func main() {
-	p := tea.NewProgram(model{}, tea.WithAltScreen())
+	if len(os.Args) >= 2 && os.Args[1] == "--play" {
+		name := "happy-path"
+		if len(os.Args) >= 3 {
+			name = os.Args[2]
+		}
+		s, ok := allScenarios[name]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "unknown scenario: %q\n", name)
+			fmt.Fprintf(os.Stderr, "available scenarios:\n")
+			for k := range allScenarios {
+				fmt.Fprintf(os.Stderr, "  %s\n", k)
+			}
+			os.Exit(1)
+		}
+		if err := playScenario(s); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Interactive browser: left/right arrow keys to step through all screens.
+	p := tea.NewProgram(model{screens: screens}, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
