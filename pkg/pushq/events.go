@@ -50,9 +50,12 @@ type EntryRecord struct {
 }
 
 // QueueStateChanged is emitted after joining and on each state poll during the
-// wait loop. Entries contains only active (non-landed) entries in queue order.
+// wait loop. Entries contains active (non-landed) entries in queue order.
+// Landed is the display label for the most recently landed commit (e.g.
+// "abc1234 fix navbar"); empty if unavailable.
 type QueueStateChanged struct {
 	Entries []EntryRecord
+	Landed  string
 }
 
 func (QueueStateChanged) sealedEvent() {}

@@ -37,11 +37,15 @@ type Scenario struct {
 }
 
 // fixed join times for the demo — stable across runs.
+// carol joined earliest (first to land), then bob, then you (last to land).
 var (
-	demoBase = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
-	idYou    = pushq.EntryID("you", demoBase, "add auth endpoint")
-	idBob    = pushq.EntryID("bob", demoBase.Add(-90*time.Second), "fix navbar")
-	idCarol  = pushq.EntryID("carol", demoBase.Add(-3*time.Minute), "update deps")
+	demoBase       = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
+	idYou          = pushq.EntryID("you", demoBase, "add auth endpoint")
+	idBob          = pushq.EntryID("bob", demoBase.Add(-90*time.Second), "fix navbar")
+	idCarol        = pushq.EntryID("carol", demoBase.Add(-3*time.Minute), "update deps")
+	demoLanded     = "e3f1a2c refactor user model"
+	carolLanded    = "a1b2c3d update deps"
+	bobLanded      = "b2c3d4e fix navbar"
 )
 
 var happyPath = Scenario{
@@ -58,21 +62,21 @@ var happyPath = Scenario{
 		{Text: "add auth endpoint", Delay: 100 * time.Millisecond, Typing: true},
 	},
 	Frames: []Frame{
-		// joining
+		// joining: carol and bob are already in the queue ahead of you
 		{pushq.PhaseChanged{Phase: pushq.PhaseJoining}, 800 * time.Millisecond},
 		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: idYou, Status: "testing"},
+			{ID: idCarol, Status: "testing"},
 			{ID: idBob, Status: "waiting"},
-			{ID: idCarol, Status: "waiting"},
-		}}, 600 * time.Millisecond},
+			{ID: idYou, Status: "waiting"},
+		}, Landed: demoLanded}, 600 * time.Millisecond},
 
-		// testing: log lines appear incrementally
+		// testing: your tests start running concurrently with carol's
 		{pushq.PhaseChanged{Phase: pushq.PhaseTesting}, 0},
 		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: idYou, Status: "testing"},
+			{ID: idCarol, Status: "testing"},
 			{ID: idBob, Status: "waiting"},
-			{ID: idCarol, Status: "waiting"},
-		}}, 0},
+			{ID: idYou, Status: "testing"},
+		}, Landed: demoLanded}, 0},
 		{pushq.LogLine{Text: "  > go test ./..."}, 400 * time.Millisecond},
 		{pushq.LogLine{Text: ""}, 0},
 		{pushq.LogLine{Text: "  ok   github.com/acme/app/api    1.204s"}, 700 * time.Millisecond},
@@ -81,21 +85,18 @@ var happyPath = Scenario{
 		{pushq.LogLine{Text: ""}, 0},
 		{pushq.LogLine{Text: "  All tests passed."}, 900 * time.Millisecond},
 
-		// waiting for bob
+		// waiting: carol landed, bob is next
 		{pushq.PhaseChanged{Phase: pushq.PhaseWaiting}, 0},
 		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
 			{ID: idBob, Status: "testing"},
 			{ID: idYou, Status: "testing"},
-			{ID: idCarol, Status: "waiting"},
-		}}, 0},
-		{pushq.LogLine{Text: "  Waiting for " + idBob + "..."}, 2200 * time.Millisecond},
+		}, Landed: carolLanded}, 2200 * time.Millisecond},
 
-		// landing
+		// landing: bob landed, you are next
 		{pushq.PhaseChanged{Phase: pushq.PhaseLanding}, 0},
 		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
 			{ID: idYou, Status: "testing"},
-			{ID: idCarol, Status: "waiting"},
-		}}, 1200 * time.Millisecond},
+		}, Landed: bobLanded}, 1200 * time.Millisecond},
 
 		// done
 		{pushq.Done{}, 0},

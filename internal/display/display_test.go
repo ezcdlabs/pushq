@@ -28,7 +28,7 @@ func TestRenderQueueState_MarksOwnEntry(t *testing.T) {
 		{ID: "alice-100-add-feature", Status: "testing"},
 		{ID: "bob-90-fix-bug", Status: "waiting"},
 	}
-	out := RenderQueueState(entries, "alice")
+	out := RenderQueueState(entries, "alice", "")
 
 	if !strings.Contains(out, ">") {
 		t.Error("expected own entry to be marked with '>'")
@@ -54,7 +54,7 @@ func TestRenderQueueState_Icons(t *testing.T) {
 		entries := []pushq.EntryRecord{
 			{ID: "alice-100-x", Status: tc.status},
 		}
-		out := RenderQueueState(entries, "other")
+		out := RenderQueueState(entries, "other", "")
 		if !strings.Contains(out, tc.wantIcon) {
 			t.Errorf("status %q: expected icon %q in output:\n%s", tc.status, tc.wantIcon, out)
 		}
@@ -67,11 +67,59 @@ func TestRenderQueueState_ShowsAllEntryIDs(t *testing.T) {
 		{ID: "bob-90-fix-bug", Status: "waiting"},
 		{ID: "carol-80-update-deps", Status: "waiting"},
 	}
-	out := RenderQueueState(entries, "alice")
+	out := RenderQueueState(entries, "alice", "")
 	for _, id := range []string{"alice-100-add-feature", "bob-90-fix-bug", "carol-80-update-deps"} {
 		if !strings.Contains(out, id) {
 			t.Errorf("expected entry ID %q in output:\n%s", id, out)
 		}
+	}
+}
+
+func TestRenderQueueState_ReversesOrder(t *testing.T) {
+	entries := []pushq.EntryRecord{
+		{ID: "alice-100-add-feature", Status: "testing"}, // first in queue (lands first)
+		{ID: "bob-90-fix-bug", Status: "waiting"},
+		{ID: "carol-80-update-deps", Status: "waiting"}, // last in queue
+	}
+	out := RenderQueueState(entries, "other", "")
+
+	alicePos := strings.Index(out, "alice")
+	bobPos := strings.Index(out, "bob")
+	carolPos := strings.Index(out, "carol")
+
+	// display order should be carol (top) → bob → alice (bottom, closest to landing)
+	if !(carolPos < bobPos && bobPos < alicePos) {
+		t.Errorf("expected carol above bob above alice, got carol=%d bob=%d alice=%d in:\n%s",
+			carolPos, bobPos, alicePos, out)
+	}
+}
+
+func TestRenderQueueState_ShowsLandedAtBottom(t *testing.T) {
+	entries := []pushq.EntryRecord{
+		{ID: "alice-100-add-feature", Status: "testing"},
+	}
+	out := RenderQueueState(entries, "alice", "abc1234 fix navbar")
+
+	if !strings.Contains(out, "fix navbar") {
+		t.Errorf("expected landed commit in output:\n%s", out)
+	}
+	alicePos := strings.Index(out, "alice")
+	landedPos := strings.Index(out, "fix navbar")
+	if landedPos < alicePos {
+		t.Errorf("expected landed entry below alice, got landed=%d alice=%d in:\n%s",
+			landedPos, alicePos, out)
+	}
+}
+
+func TestRenderQueueState_OmitsLandedRowWhenEmpty(t *testing.T) {
+	entries := []pushq.EntryRecord{
+		{ID: "alice-100-x", Status: "testing"},
+	}
+	out := RenderQueueState(entries, "alice", "")
+	// Should not have a stray checkmark from a landed row
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected exactly 1 line with no landed entry, got %d lines:\n%s", len(lines), out)
 	}
 }
 

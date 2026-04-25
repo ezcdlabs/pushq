@@ -734,3 +734,32 @@ func TestPush_ContextCancelledWhileWaiting_EjectsEntry(t *testing.T) {
 		}
 	}
 }
+
+func TestPush_QueueStateChanged_LandedPopulatedFromRemoteHead(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+
+	clone.WriteFile("feature.txt", "hello")
+	clone.CommitAll("add feature")
+
+	var firstLanded string
+	for ev := range pushq.Push(context.Background(), pushq.PushOptions{
+		RepoPath:      clone.Path,
+		Remote:        "origin",
+		MainBranch:    "main",
+		TestCommand:   gittest.PassingTestCommand(),
+		CommitMessage: "add feature",
+		Username:      "alice",
+	}) {
+		if qsc, ok := ev.(pushq.QueueStateChanged); ok && firstLanded == "" {
+			firstLanded = qsc.Landed
+		}
+	}
+
+	if firstLanded == "" {
+		t.Fatal("expected QueueStateChanged.Landed to be non-empty")
+	}
+	if !strings.Contains(firstLanded, "initial commit") {
+		t.Errorf("expected Landed to contain remote HEAD subject %q, got: %q", "initial commit", firstLanded)
+	}
+}

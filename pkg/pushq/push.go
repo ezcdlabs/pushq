@@ -87,7 +87,10 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 		}
 
 		// Emit queue state so the TUI left panel stays current.
-		events <- QueueStateChanged{Entries: toEntryRecords(entries)}
+		events <- QueueStateChanged{
+			Entries: toEntryRecords(entries),
+			Landed:  remoteHeadLabel(opts.RepoPath, opts.Remote, opts.MainBranch),
+		}
 
 		var aheadRefs []string
 		for _, e := range entries {
@@ -270,6 +273,17 @@ func squashAndPushEntryRef(repoPath, remote, mainBranch, message, entryRef strin
 	_ = git(repoPath, "checkout", "-")
 	_ = git(repoPath, "branch", "-D", tmpBranch)
 	return nil
+}
+
+func remoteHeadLabel(repoPath, remote, mainBranch string) string {
+	cmd := exec.Command("git", "log", "-1", "--format=%h %s", remote+"/"+mainBranch)
+	cmd.Dir = repoPath
+	cmd.Env = gitenv.Clean()
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func gitRevParse(repoPath, ref string) (string, error) {

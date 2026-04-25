@@ -81,6 +81,7 @@ func isTerminal(w io.Writer) bool {
 // suppressed unless verbose is true.
 func RunInline(session PushSession, out io.Writer, username string, verbose bool) error {
 	var entries []pushq.EntryRecord
+	var landed string
 	var finalErr error
 
 	printer := &snapshotPrinter{out: out, inPlace: !verbose && isTerminal(out)}
@@ -89,7 +90,7 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 		if len(entries) == 0 {
 			printer.print("\n" + renderJoining() + "\n")
 		} else {
-			printer.print("\n" + renderJoined() + "\n\nQueue\n" + RenderQueueState(entries, username))
+			printer.print("\n" + renderJoined() + "\n\nQueue\n" + RenderQueueState(entries, username, landed))
 		}
 	}
 
@@ -99,6 +100,7 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 			printSnapshot()
 		case pushq.QueueStateChanged:
 			entries = e.Entries
+			landed = e.Landed
 			printSnapshot()
 		case pushq.LogLine:
 			if verbose {
@@ -122,13 +124,17 @@ func renderJoined() string {
 	return check + " joined"
 }
 
-// RenderQueueState returns a formatted string of queue entries. Entries
-// belonging to username are marked with ">".
-func RenderQueueState(entries []pushq.EntryRecord, username string) string {
+// RenderQueueState returns a formatted string of queue entries. Entries are
+// displayed in reverse queue order (last to land at top, first to land at
+// bottom) so the display reads like git log — newest above, oldest below.
+// Entries belonging to username are marked with ">". If landed is non-empty it
+// is rendered as the bottom row representing the most recently landed commit.
+func RenderQueueState(entries []pushq.EntryRecord, username string, landed string) string {
 	var sb strings.Builder
 
 	ownPrefix := username + "-"
-	for _, e := range entries {
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
 		isOwn := strings.HasPrefix(e.ID, ownPrefix)
 
 		marker := "  "
@@ -146,6 +152,12 @@ func RenderQueueState(entries []pushq.EntryRecord, username string) string {
 		}
 
 		sb.WriteString(fmt.Sprintf("%s%s  %s\n", marker, icon, idStyle.Render(e.ID)))
+	}
+
+	if landed != "" {
+		check := lipgloss.NewStyle().Foreground(colorGreen).Render("✔")
+		label := lipgloss.NewStyle().Foreground(colorGray).Render(landed)
+		sb.WriteString(fmt.Sprintf("  %s  %s\n", check, label))
 	}
 
 	return sb.String()
