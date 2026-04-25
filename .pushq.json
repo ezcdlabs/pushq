@@ -1,0 +1,4 @@
+{
+  "test_command": "go test ./...",
+  "main_branch": "main"
+}
