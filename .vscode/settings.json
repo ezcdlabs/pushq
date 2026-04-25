@@ -2,7 +2,7 @@
   "go.coverageOptions": "showBothCoveredAndUncoveredCode",
   "go.coverOnSave": true,
   "go.coverageDecorator": {
-    "type": "highlight",
+    "type": "gutter",
     "coveredHighlightColor": "rgba(64,128,128,0.5)",
     "uncoveredHighlightColor": "rgba(128,64,64,0.25)",
     "coveredBorderColor": "rgba(64,128,128,0.5)",

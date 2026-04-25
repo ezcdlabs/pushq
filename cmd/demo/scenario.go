@@ -7,14 +7,6 @@ import (
 	"github.com/ezcdlabs/pushq/pkg/pushq"
 )
 
-// fixed join times for the demo — stable across runs.
-var (
-	demoBase  = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
-	idYou   = pushq.EntryID("you", demoBase, "add auth endpoint")
-	idBob   = pushq.EntryID("bob", demoBase.Add(-90*time.Second), "fix navbar")
-	idCarol = pushq.EntryID("carol", demoBase.Add(-3*time.Minute), "update deps")
-)
-
 // shellPrompt renders a Ubuntu-style coloured bash prompt.
 func shellPrompt(user, host, path string) string {
 	userHost := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Render(user + "@" + host)
@@ -22,7 +14,7 @@ func shellPrompt(user, host, path string) string {
 	return userHost + ":" + dir + "$ "
 }
 
-// PreludeLine is a line of terminal output printed before the TUI starts.
+// PreludeLine is a line of terminal output printed before the push session starts.
 type PreludeLine struct {
 	Text      string
 	Delay     time.Duration // pause before printing
@@ -30,10 +22,11 @@ type PreludeLine struct {
 	NoNewline bool          // suppress trailing newline (for prompt prefixes)
 }
 
-// Frame is a single TUI state shown for a fixed duration during autoplay.
+// Frame is a single event emitted to the display, held for a duration before
+// the next event is sent.
 type Frame struct {
-	Screen screen
-	Hold   time.Duration
+	Event pushq.Event
+	Hold  time.Duration
 }
 
 // Scenario is a named sequence used for demo recording and screenshots.
@@ -43,7 +36,14 @@ type Scenario struct {
 	Frames  []Frame
 }
 
-// happyPath shows the common case: one person in the queue, tests pass, lands on main.
+// fixed join times for the demo — stable across runs.
+var (
+	demoBase = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
+	idYou    = pushq.EntryID("you", demoBase, "add auth endpoint")
+	idBob    = pushq.EntryID("bob", demoBase.Add(-90*time.Second), "fix navbar")
+	idCarol  = pushq.EntryID("carol", demoBase.Add(-3*time.Minute), "update deps")
+)
+
 var happyPath = Scenario{
 	Name: "happy-path",
 	Prelude: []PreludeLine{
@@ -58,132 +58,47 @@ var happyPath = Scenario{
 		{Text: "add auth endpoint", Delay: 100 * time.Millisecond, Typing: true},
 	},
 	Frames: []Frame{
-		{
-			Screen: screen{
-				phase: "joining",
-				entries: []entry{
-					{name: idYou, status: statusTesting, isYou: true},
-					{name: idBob, status: statusWaiting},
-					{name: idCarol, status: statusWaiting},
-				},
-				panelLines: []string{
-					"  > go test ./...",
-					"",
-				},
-			},
-			Hold: 600 * time.Millisecond,
-		},
-		{
-			Screen: screen{
-				phase: "running tests  (1 / 3)",
-				entries: []entry{
-					{name: idYou, status: statusTesting, isYou: true},
-					{name: idBob, status: statusWaiting},
-					{name: idCarol, status: statusWaiting},
-				},
-				panelLines: []string{
-					"  > go test ./...",
-					"",
-					"  ok   github.com/acme/app/api    1.204s",
-				},
-			},
-			Hold: 700 * time.Millisecond,
-		},
-		{
-			Screen: screen{
-				phase: "running tests  (1 / 3)",
-				entries: []entry{
-					{name: idYou, status: statusTesting, isYou: true},
-					{name: idBob, status: statusWaiting},
-					{name: idCarol, status: statusWaiting},
-				},
-				panelLines: []string{
-					"  > go test ./...",
-					"",
-					"  ok   github.com/acme/app/api    1.204s",
-					"  ok   github.com/acme/app/auth   0.812s",
-					"  ---  github.com/acme/app/db     [running]",
-				},
-			},
-			Hold: 1200 * time.Millisecond,
-		},
-		{
-			Screen: screen{
-				phase: "running tests  (1 / 3)",
-				entries: []entry{
-					{name: idYou, status: statusTesting, isYou: true},
-					{name: idBob, status: statusWaiting},
-					{name: idCarol, status: statusWaiting},
-				},
-				panelLines: []string{
-					"  > go test ./...",
-					"",
-					"  ok   github.com/acme/app/api    1.204s",
-					"  ok   github.com/acme/app/auth   0.812s",
-					"  ok   github.com/acme/app/db     2.001s",
-					"",
-					"  All tests passed.",
-				},
-			},
-			Hold: 900 * time.Millisecond,
-		},
-		{
-			Screen: screen{
-				phase: "waiting for " + idBob + "  (2 / 3)",
-				entries: []entry{
-					{name: idBob, status: statusTesting},
-					{name: idYou, status: statusPassed, isYou: true},
-					{name: idCarol, status: statusWaiting},
-				},
-				panelLines: []string{
-					"  > go test ./...",
-					"",
-					"  ok   github.com/acme/app/api    1.204s",
-					"  ok   github.com/acme/app/auth   0.812s",
-					"  ok   github.com/acme/app/db     2.001s",
-					"",
-					"  All tests passed.",
-					"  Waiting for " + idBob + "...",
-				},
-			},
-			Hold: 2200 * time.Millisecond,
-		},
-		{
-			Screen: screen{
-				phase: "landing  (1 / 2)",
-				entries: []entry{
-					{name: idYou, status: statusLanding, isYou: true},
-					{name: idCarol, status: statusWaiting},
-				},
-				panelLines: []string{
-					"  > go test ./...",
-					"",
-					"  ok   github.com/acme/app/api    1.204s",
-					"  ok   github.com/acme/app/auth   0.812s",
-					"  ok   github.com/acme/app/db     2.001s",
-					"",
-					"  All tests passed.",
-					"",
-					"  Pushing to main...",
-				},
-			},
-			Hold: 1200 * time.Millisecond,
-		},
-		{
-			Screen: screen{
-				phase: "landed",
-				entries: []entry{
-					{name: idYou, status: statusLanded, isYou: true},
-					{name: idCarol, status: statusWaiting},
-				},
-				panelLines: []string{
-					"  Landed on main.",
-					"",
-					"  a1b2c3d  add auth endpoint",
-				},
-			},
-			Hold: 2000 * time.Millisecond,
-		},
+		// joining
+		{pushq.PhaseChanged{Phase: pushq.PhaseJoining}, 800 * time.Millisecond},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			{ID: idYou, Status: "testing"},
+			{ID: idBob, Status: "waiting"},
+			{ID: idCarol, Status: "waiting"},
+		}}, 600 * time.Millisecond},
+
+		// testing: log lines appear incrementally
+		{pushq.PhaseChanged{Phase: pushq.PhaseTesting}, 0},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			{ID: idYou, Status: "testing"},
+			{ID: idBob, Status: "waiting"},
+			{ID: idCarol, Status: "waiting"},
+		}}, 0},
+		{pushq.LogLine{Text: "  > go test ./..."}, 400 * time.Millisecond},
+		{pushq.LogLine{Text: ""}, 0},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/api    1.204s"}, 700 * time.Millisecond},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/auth   0.812s"}, 700 * time.Millisecond},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/db     2.001s"}, 0},
+		{pushq.LogLine{Text: ""}, 0},
+		{pushq.LogLine{Text: "  All tests passed."}, 900 * time.Millisecond},
+
+		// waiting for bob
+		{pushq.PhaseChanged{Phase: pushq.PhaseWaiting}, 0},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			{ID: idBob, Status: "testing"},
+			{ID: idYou, Status: "testing"},
+			{ID: idCarol, Status: "waiting"},
+		}}, 0},
+		{pushq.LogLine{Text: "  Waiting for " + idBob + "..."}, 2200 * time.Millisecond},
+
+		// landing
+		{pushq.PhaseChanged{Phase: pushq.PhaseLanding}, 0},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			{ID: idYou, Status: "testing"},
+			{ID: idCarol, Status: "waiting"},
+		}}, 1200 * time.Millisecond},
+
+		// done
+		{pushq.Done{}, 0},
 	},
 }
 
