@@ -53,6 +53,7 @@ func TestRenderQueueState_Icons(t *testing.T) {
 		{"waiting", "·"},
 		{"testing", spinnerFrames[0]},
 		{"done", "✔"},
+		{"ejected", "✗"},
 	}
 
 	for _, tc := range cases {

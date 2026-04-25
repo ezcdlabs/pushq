@@ -16,6 +16,7 @@ import (
 var (
 	colorCyan  = lipgloss.Color("6")
 	colorGreen = lipgloss.Color("2")
+	colorRed   = lipgloss.Color("1")
 	colorGray  = lipgloss.Color("8")
 	colorWhite = lipgloss.Color("15")
 )
@@ -253,6 +254,8 @@ func EntryIcon(status string, spinnerIdx int) string {
 		return lipgloss.NewStyle().Foreground(colorCyan).Render(spinnerFrames[spinnerIdx%len(spinnerFrames)])
 	case "done":
 		return lipgloss.NewStyle().Foreground(colorGreen).Render("✔")
+	case "ejected":
+		return lipgloss.NewStyle().Foreground(colorRed).Render("✗")
 	default:
 		return lipgloss.NewStyle().Foreground(colorGray).Render("·")
 	}

@@ -149,7 +149,6 @@ var happyPath = Scenario{
 
 var testFailure = Scenario{
 	Name:       "test-failure",
-	Verbose:    true,
 	FailureMsg: "\nfailed: tests failed.",
 	Prelude:    happyPath.Prelude,
 	Frames: []Frame{
@@ -175,7 +174,11 @@ var testFailure = Scenario{
 		{pushq.LogLine{Text: "  FAIL"}, 0},
 		{pushq.LogLine{Text: ""}, 900 * time.Millisecond},
 
-		// ejected
+		// ejected — show your entry as failed before closing
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			withStatus(recCarol, "testing"),
+			withStatus(recYou, "ejected"),
+		}, Landed: landedBefore}, 400 * time.Millisecond},
 		{pushq.Done{Err: errors.New("tests failed")}, 0},
 	},
 }
