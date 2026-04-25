@@ -223,7 +223,8 @@ There is one command: `git pushq`. Queue visibility and cancellation are built i
 1.  Check working state (see squash flow above)
 2.  Fetch refs/pushq/state
 3.  Optimistic lock loop:
-      a. Compute entry-id = "<username>-<unix-timestamp>"
+      a. Compute entry-id = "<username>-<unix-timestamp>-<commit-slug>"
+         where commit-slug is the squash message slugified (lowercase, spaces→hyphens, non-alphanumeric stripped)
       b. Create entries/<entry-id>.json with status "waiting"
       c. Commit to state branch with message "join: <entry-id>"
       d. git push refs/pushq/state
@@ -271,9 +272,47 @@ If tests are already running when the queue changes, finish the current run firs
 
 ### Live queue display during `git pushq`
 
-While `git pushq` is running, it continuously polls `refs/pushq/state` and renders the current queue inline — entry IDs, statuses, and positions — updating on each poll tick. There are no separate `git pushq status` or `git pushq cancel` commands.
+While `git pushq` is running, it prints queue state updates inline in the terminal — no alt-screen takeover. Each poll that produces a change prints a fresh snapshot of the queue (entry IDs and statuses) directly to stdout. The test command's output is suppressed by default; pass `--verbose` to stream it.
 
-To cancel, the user presses `Q`. This triggers a self-ejection (same flow as a test failure ejection), deletes the queue ref, and restores stashed changes if applicable.
+There are no separate `git pushq status` or `git pushq cancel` commands.
+
+To cancel, the user presses `ctrl+c`. This triggers a self-ejection (same flow as a test failure ejection), deletes the queue ref, and restores stashed changes if applicable.
+
+### End-result summary
+
+When `git pushq` finishes, it prints a clear summary regardless of outcome:
+
+**Landed:**
+```
+✔  Landed on main
+   add auth endpoint  (a1b2c3d)
+   Elapsed: 2m 14s
+```
+
+**Tests failed:**
+```
+✗  Tests failed — ejected from queue
+   Run your tests to see the output:
+
+     make test
+
+   Fix the failure and run git pushq again.
+   Elapsed: 1m 47s
+```
+
+**Ejected (conflict):**
+```
+✗  Conflict — ejected from queue
+   Conflicting entry: bob-1745598500-fix-navbar
+   Fix the conflict and run git pushq again.
+   Elapsed: 0m 12s
+```
+
+If uncommitted changes were stashed, the summary also confirms whether the stash was restored or instructs the user to run `git stash pop` manually.
+
+### Elapsed time
+
+The elapsed time shown in the end-result summary covers the full `git pushq` run — from join to land or ejection. This gives the developer a sense of how long they occupied the machine.
 
 ---
 
@@ -335,9 +374,11 @@ type PushSession interface {
 }
 ```
 
-### TUI: Bubble Tea + Lipgloss
+### Display: Lipgloss, no alt-screen
 
-The interactive display during `git pushq` is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss). These are chosen over raw ANSI/PTY approaches for cross-platform support (including Windows) via `golang.org/x/term`. Bubble Tea's model/update/view pattern is also significantly easier to reason about than cursor manipulation by hand.
+The live queue display and end-result summary are rendered with [Lipgloss](https://github.com/charmbracelet/lipgloss) for colour and styling. There is no alt-screen takeover — output is written inline to the terminal so it stays in the scrollback buffer and is visible in CI logs.
+
+[Bubble Tea](https://github.com/charmbracelet/bubbletea) is still used in `cmd/demo` for the interactive design browser, and the `PushSession` / event model it introduced is retained as the internal seam for testing.
 
 ### go-git vs shelling out
 
@@ -429,3 +470,5 @@ Issues are grouped roughly by when they are likely to surface.
 ### Future / optional
 
 - **Multi-commit option** — v1 squashes always; a future flag could preserve commits for teams with atomic-commit history policies (squash for the queue ref, restore original commits when landing on main).
+- **Desktop notifications** — since tests take ~1 minute and developers context-switch, a `notify-send` / macOS notification on completion would let users move on without polling the terminal.
+- **Per-entry elapsed time** — the queue display currently shows a total elapsed time for the run. A future improvement would show a running timer next to each entry, since we know each entry's join time from the entry ID timestamp.
