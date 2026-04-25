@@ -3,6 +3,7 @@ package display
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ezcdlabs/pushq/pkg/pushq"
 )
@@ -23,18 +24,21 @@ func (f *fakeSession) Start() <-chan pushq.Event {
 
 func (f *fakeSession) Cancel() {}
 
+// fixed reference time used across rendering tests
+var testNow = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
+
 func TestRenderQueueState_MarksOwnEntry(t *testing.T) {
 	entries := []pushq.EntryRecord{
-		{ID: "alice-100-add-feature", Status: "testing"},
-		{ID: "bob-90-fix-bug", Status: "waiting"},
+		{ID: "alice-100-add-feature", Author: "alice", Message: "add feature", Status: "testing"},
+		{ID: "bob-90-fix-bug", Author: "bob", Message: "fix bug", Status: "waiting"},
 	}
-	out := RenderQueueState(entries, "alice", "", 0)
+	out := RenderQueueState(entries, "alice", nil, 0, testNow)
 
 	if !strings.Contains(out, ">") {
 		t.Error("expected own entry to be marked with '>'")
 	}
 	for _, l := range strings.Split(out, "\n") {
-		if strings.Contains(l, "bob-90-fix-bug") && strings.Contains(l, ">") {
+		if strings.Contains(l, "bob") && strings.Contains(l, ">") {
 			t.Error("expected bob's entry to NOT be marked with '>'")
 		}
 	}
@@ -52,9 +56,9 @@ func TestRenderQueueState_Icons(t *testing.T) {
 
 	for _, tc := range cases {
 		entries := []pushq.EntryRecord{
-			{ID: "alice-100-x", Status: tc.status},
+			{ID: "alice-100-x", Author: "alice", Message: "x", Status: tc.status},
 		}
-		out := RenderQueueState(entries, "other", "", 0)
+		out := RenderQueueState(entries, "other", nil, 0, testNow)
 		if !strings.Contains(out, tc.wantIcon) {
 			t.Errorf("status %q: expected icon %q in output:\n%s", tc.status, tc.wantIcon, out)
 		}
@@ -69,33 +73,56 @@ func TestEntryIcon_TestingSpinnerAdvances(t *testing.T) {
 	}
 }
 
+func TestRenderQueueState_ShowsAuthorAndMessage(t *testing.T) {
+	entries := []pushq.EntryRecord{
+		{ID: "alice-100-x", Author: "alice", Message: "add auth endpoint", Status: "testing"},
+	}
+	out := RenderQueueState(entries, "alice", nil, 0, testNow)
+	if !strings.Contains(out, "alice") {
+		t.Errorf("expected author in output:\n%s", out)
+	}
+	if !strings.Contains(out, "add auth endpoint") {
+		t.Errorf("expected message in output:\n%s", out)
+	}
+}
+
+func TestRenderQueueState_ShowsElapsedForActiveEntry(t *testing.T) {
+	joinedAt := testNow.Add(-90 * time.Second)
+	entries := []pushq.EntryRecord{
+		{ID: "alice-100-x", Author: "alice", Message: "add feature", Status: "testing", JoinedAt: joinedAt},
+	}
+	out := RenderQueueState(entries, "alice", nil, 0, testNow)
+	if !strings.Contains(out, "1m 30s") {
+		t.Errorf("expected elapsed '1m 30s' in output:\n%s", out)
+	}
+}
+
 func TestRenderQueueState_ShowsAllEntryIDs(t *testing.T) {
 	entries := []pushq.EntryRecord{
-		{ID: "alice-100-add-feature", Status: "testing"},
-		{ID: "bob-90-fix-bug", Status: "waiting"},
-		{ID: "carol-80-update-deps", Status: "waiting"},
+		{ID: "alice-100-add-feature", Author: "alice", Message: "add feature", Status: "testing"},
+		{ID: "bob-90-fix-bug", Author: "bob", Message: "fix bug", Status: "waiting"},
+		{ID: "carol-80-update-deps", Author: "carol", Message: "update deps", Status: "waiting"},
 	}
-	out := RenderQueueState(entries, "alice", "", 0)
-	for _, id := range []string{"alice-100-add-feature", "bob-90-fix-bug", "carol-80-update-deps"} {
-		if !strings.Contains(out, id) {
-			t.Errorf("expected entry ID %q in output:\n%s", id, out)
+	out := RenderQueueState(entries, "alice", nil, 0, testNow)
+	for _, name := range []string{"alice", "bob", "carol"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("expected %q in output:\n%s", name, out)
 		}
 	}
 }
 
 func TestRenderQueueState_ReversesOrder(t *testing.T) {
 	entries := []pushq.EntryRecord{
-		{ID: "alice-100-add-feature", Status: "testing"}, // first in queue (lands first)
-		{ID: "bob-90-fix-bug", Status: "waiting"},
-		{ID: "carol-80-update-deps", Status: "waiting"}, // last in queue
+		{ID: "alice-100-x", Author: "alice", Message: "a", Status: "testing"},
+		{ID: "bob-90-x", Author: "bob", Message: "b", Status: "waiting"},
+		{ID: "carol-80-x", Author: "carol", Message: "c", Status: "waiting"},
 	}
-	out := RenderQueueState(entries, "other", "", 0)
+	out := RenderQueueState(entries, "other", nil, 0, testNow)
 
 	alicePos := strings.Index(out, "alice")
 	bobPos := strings.Index(out, "bob")
 	carolPos := strings.Index(out, "carol")
 
-	// display order should be carol (top) → bob → alice (bottom, closest to landing)
 	if !(carolPos < bobPos && bobPos < alicePos) {
 		t.Errorf("expected carol above bob above alice, got carol=%d bob=%d alice=%d in:\n%s",
 			carolPos, bobPos, alicePos, out)
@@ -104,12 +131,13 @@ func TestRenderQueueState_ReversesOrder(t *testing.T) {
 
 func TestRenderQueueState_ShowsLandedAtBottom(t *testing.T) {
 	entries := []pushq.EntryRecord{
-		{ID: "alice-100-add-feature", Status: "testing"},
+		{ID: "alice-100-x", Author: "alice", Message: "add feature", Status: "testing"},
 	}
-	out := RenderQueueState(entries, "alice", "abc1234 fix navbar", 0)
+	landed := &pushq.EntryRecord{Author: "bob", Message: "fix navbar"}
+	out := RenderQueueState(entries, "alice", landed, 0, testNow)
 
 	if !strings.Contains(out, "fix navbar") {
-		t.Errorf("expected landed commit in output:\n%s", out)
+		t.Errorf("expected landed message in output:\n%s", out)
 	}
 	alicePos := strings.Index(out, "alice")
 	landedPos := strings.Index(out, "fix navbar")
@@ -119,12 +147,24 @@ func TestRenderQueueState_ShowsLandedAtBottom(t *testing.T) {
 	}
 }
 
-func TestRenderQueueState_OmitsLandedRowWhenEmpty(t *testing.T) {
-	entries := []pushq.EntryRecord{
-		{ID: "alice-100-x", Status: "testing"},
+func TestRenderQueueState_LandedShowsFixedElapsed(t *testing.T) {
+	joinedAt := testNow.Add(-5 * time.Minute)
+	landedAt := testNow.Add(-2 * time.Minute)
+	landed := &pushq.EntryRecord{
+		Author: "bob", Message: "fix navbar",
+		JoinedAt: joinedAt, LandedAt: landedAt,
 	}
-	out := RenderQueueState(entries, "alice", "", 0)
-	// Should not have a stray checkmark from a landed row
+	out := RenderQueueState(nil, "alice", landed, 0, testNow)
+	if !strings.Contains(out, "3m 00s") {
+		t.Errorf("expected elapsed '3m 00s' for landed entry:\n%s", out)
+	}
+}
+
+func TestRenderQueueState_OmitsLandedRowWhenNil(t *testing.T) {
+	entries := []pushq.EntryRecord{
+		{ID: "alice-100-x", Author: "alice", Message: "x", Status: "testing"},
+	}
+	out := RenderQueueState(entries, "alice", nil, 0, testNow)
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) != 1 {
 		t.Errorf("expected exactly 1 line with no landed entry, got %d lines:\n%s", len(lines), out)
@@ -152,7 +192,7 @@ func TestRunInline_AfterJoining_ShowsJoinedHeader(t *testing.T) {
 	session := &fakeSession{events: []pushq.Event{
 		pushq.PhaseChanged{Phase: pushq.PhaseJoining},
 		pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: "alice-100-add-feature", Status: "testing"},
+			{ID: "alice-100-add-feature", Author: "alice", Message: "add feature", Status: "testing"},
 		}},
 		pushq.Done{},
 	}}
@@ -170,7 +210,7 @@ func TestRunInline_AfterJoining_ShowsQueueHeader(t *testing.T) {
 	session := &fakeSession{events: []pushq.Event{
 		pushq.PhaseChanged{Phase: pushq.PhaseJoining},
 		pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: "alice-100-add-feature", Status: "testing"},
+			{ID: "alice-100-add-feature", Author: "alice", Message: "add feature", Status: "testing"},
 		}},
 		pushq.Done{},
 	}}
@@ -188,8 +228,8 @@ func TestRunInline_PrintsQueueOnStateChange(t *testing.T) {
 	session := &fakeSession{events: []pushq.Event{
 		pushq.PhaseChanged{Phase: pushq.PhaseJoining},
 		pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: "alice-100-add-feature", Status: "testing"},
-			{ID: "bob-90-fix-bug", Status: "waiting"},
+			{ID: "alice-100-add-feature", Author: "alice", Message: "add feature", Status: "testing"},
+			{ID: "bob-90-fix-bug", Author: "bob", Message: "fix bug", Status: "waiting"},
 		}},
 		pushq.Done{},
 	}}
@@ -198,11 +238,11 @@ func TestRunInline_PrintsQueueOnStateChange(t *testing.T) {
 	RunInline(session, &buf, "alice", false)
 
 	out := buf.String()
-	if !strings.Contains(out, "alice-100-add-feature") {
-		t.Errorf("expected alice's entry in output:\n%s", out)
+	if !strings.Contains(out, "alice") {
+		t.Errorf("expected alice in output:\n%s", out)
 	}
-	if !strings.Contains(out, "bob-90-fix-bug") {
-		t.Errorf("expected bob's entry in output:\n%s", out)
+	if !strings.Contains(out, "bob") {
+		t.Errorf("expected bob in output:\n%s", out)
 	}
 }
 
@@ -254,9 +294,7 @@ func TestSnapshotPrinter_InPlace_FirstPrintNoEscapes(t *testing.T) {
 
 	p.print("line1\nline2\n")
 
-	// First print: no cursor movement yet (nothing to overwrite)
 	if strings.Contains(buf.String(), "\033[") {
-		// Allow \033[K (clear to EOL) but not cursor-up sequences
 		for _, seq := range strings.Split(buf.String(), "\033[") {
 			if len(seq) > 0 && seq[0] == '[' {
 				t.Errorf("unexpected cursor-movement sequence in first print: %q", buf.String())
@@ -284,11 +322,9 @@ func TestSnapshotPrinter_InPlace_MovesUpByLineCount(t *testing.T) {
 	var buf strings.Builder
 	p := &snapshotPrinter{out: &buf, inPlace: true}
 
-	// First print: 3 lines
 	p.print("a\nb\nc\n")
 	first := buf.String()
 
-	// Second print: cursor should move up 3 lines
 	p.print("x\ny\nz\n")
 	second := buf.String()[len(first):]
 
@@ -301,15 +337,14 @@ func TestSnapshotPrinter_InPlace_ClearsExtraLinesWhenShrinking(t *testing.T) {
 	var buf strings.Builder
 	p := &snapshotPrinter{out: &buf, inPlace: true}
 
-	p.print("a\nb\nc\n") // 3 lines
+	p.print("a\nb\nc\n")
 	first := buf.String()
 
-	p.print("x\n") // 1 line — shrinking
+	p.print("x\n")
 	second := buf.String()[len(first):]
 
-	// Must clear the 2 lines that are no longer part of the snapshot
 	clearCount := strings.Count(second, "\033[K")
-	if clearCount < 3 { // 1 new line + 2 cleared old lines
+	if clearCount < 3 {
 		t.Errorf("expected at least 3 clear-to-EOL sequences when shrinking, got %d in: %q", clearCount, second)
 	}
 }

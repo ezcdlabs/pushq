@@ -88,8 +88,8 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 
 		// Emit queue state so the TUI left panel stays current.
 		events <- QueueStateChanged{
-			Entries: toEntryRecords(entries),
-			Landed:  remoteHeadLabel(opts.RepoPath, opts.Remote, opts.MainBranch),
+			Entries: enrichEntryRecords(opts.RepoPath, entries),
+			Landed:  remoteHeadEntry(opts.RepoPath, opts.Remote, opts.MainBranch),
 		}
 
 		var aheadRefs []string
@@ -216,11 +216,19 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 	}
 }
 
-// toEntryRecords converts internal queue records to the public EntryRecord type.
-func toEntryRecords(entries []queue.EntryRecord) []EntryRecord {
+// enrichEntryRecords converts internal queue records to public EntryRecord
+// values, reading author, message, and join time from each entry's git ref.
+func enrichEntryRecords(repoPath string, entries []queue.EntryRecord) []EntryRecord {
 	out := make([]EntryRecord, len(entries))
 	for i, e := range entries {
-		out[i] = EntryRecord{ID: e.ID, Ref: e.Ref, Status: string(e.Status)}
+		out[i] = EntryRecord{
+			ID:       e.ID,
+			Ref:      e.Ref,
+			Status:   string(e.Status),
+			Author:   refField(repoPath, e.Ref, "%an"),
+			Message:  refField(repoPath, e.Ref, "%s"),
+			JoinedAt: refTime(repoPath, e.Ref, "%ct"),
+		}
 	}
 	return out
 }
@@ -275,8 +283,28 @@ func squashAndPushEntryRef(repoPath, remote, mainBranch, message, entryRef strin
 	return nil
 }
 
-func remoteHeadLabel(repoPath, remote, mainBranch string) string {
-	cmd := exec.Command("git", "log", "-1", "--format=%h %s", remote+"/"+mainBranch)
+func remoteHeadEntry(repoPath, remote, mainBranch string) *EntryRecord {
+	ref := remote + "/" + mainBranch
+	author := refField(repoPath, ref, "%an")
+	message := refField(repoPath, ref, "%s")
+	shortHash := refField(repoPath, ref, "%h")
+	joinedAt := refTime(repoPath, ref, "%at") // author timestamp ≈ when work was done
+	landedAt := refTime(repoPath, ref, "%ct") // committer timestamp ≈ when it landed
+	if author == "" && message == "" {
+		return nil
+	}
+	return &EntryRecord{
+		ID:       shortHash,
+		Author:   author,
+		Message:  message,
+		JoinedAt: joinedAt,
+		LandedAt: landedAt,
+	}
+}
+
+// refField reads a single git log format field from a ref.
+func refField(repoPath, ref, format string) string {
+	cmd := exec.Command("git", "log", "-1", "--format="+format, ref)
 	cmd.Dir = repoPath
 	cmd.Env = gitenv.Clean()
 	out, err := cmd.Output()
@@ -284,6 +312,19 @@ func remoteHeadLabel(repoPath, remote, mainBranch string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// refTime reads a unix timestamp field from a git log format and returns it as time.Time.
+func refTime(repoPath, ref, format string) time.Time {
+	s := refField(repoPath, ref, format)
+	if s == "" {
+		return time.Time{}
+	}
+	var ts int64
+	if _, err := fmt.Sscan(s, &ts); err != nil {
+		return time.Time{}
+	}
+	return time.Unix(ts, 0)
 }
 
 func gitRevParse(repoPath, ref string) (string, error) {

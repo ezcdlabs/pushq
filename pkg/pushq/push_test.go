@@ -742,7 +742,7 @@ func TestPush_QueueStateChanged_LandedPopulatedFromRemoteHead(t *testing.T) {
 	clone.WriteFile("feature.txt", "hello")
 	clone.CommitAll("add feature")
 
-	var firstLanded string
+	var firstLanded *pushq.EntryRecord
 	for ev := range pushq.Push(context.Background(), pushq.PushOptions{
 		RepoPath:      clone.Path,
 		Remote:        "origin",
@@ -751,15 +751,58 @@ func TestPush_QueueStateChanged_LandedPopulatedFromRemoteHead(t *testing.T) {
 		CommitMessage: "add feature",
 		Username:      "alice",
 	}) {
-		if qsc, ok := ev.(pushq.QueueStateChanged); ok && firstLanded == "" {
+		if qsc, ok := ev.(pushq.QueueStateChanged); ok && firstLanded == nil {
 			firstLanded = qsc.Landed
 		}
 	}
 
-	if firstLanded == "" {
-		t.Fatal("expected QueueStateChanged.Landed to be non-empty")
+	if firstLanded == nil {
+		t.Fatal("expected QueueStateChanged.Landed to be non-nil")
 	}
-	if !strings.Contains(firstLanded, "initial commit") {
-		t.Errorf("expected Landed to contain remote HEAD subject %q, got: %q", "initial commit", firstLanded)
+	if firstLanded.Message != "initial commit" {
+		t.Errorf("expected Landed.Message %q, got %q", "initial commit", firstLanded.Message)
+	}
+	if firstLanded.Author == "" {
+		t.Error("expected Landed.Author to be non-empty")
+	}
+	if firstLanded.LandedAt.IsZero() {
+		t.Error("expected Landed.LandedAt to be populated")
+	}
+}
+
+func TestPush_QueueStateChanged_EntriesHaveAuthorMessageAndJoinedAt(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+
+	clone.WriteFile("feature.txt", "hello")
+	clone.CommitAll("add feature")
+
+	var firstQSC *pushq.QueueStateChanged
+	for ev := range pushq.Push(context.Background(), pushq.PushOptions{
+		RepoPath:      clone.Path,
+		Remote:        "origin",
+		MainBranch:    "main",
+		TestCommand:   gittest.PassingTestCommand(),
+		CommitMessage: "add feature",
+		Username:      "alice",
+	}) {
+		if qsc, ok := ev.(pushq.QueueStateChanged); ok && firstQSC == nil {
+			q := qsc
+			firstQSC = &q
+		}
+	}
+
+	if firstQSC == nil || len(firstQSC.Entries) == 0 {
+		t.Fatal("expected at least one entry in first QueueStateChanged")
+	}
+	e := firstQSC.Entries[0]
+	if e.Message != "add feature" {
+		t.Errorf("expected Entry.Message %q, got %q", "add feature", e.Message)
+	}
+	if e.Author == "" {
+		t.Error("expected Entry.Author to be non-empty")
+	}
+	if e.JoinedAt.IsZero() {
+		t.Error("expected Entry.JoinedAt to be populated")
 	}
 }

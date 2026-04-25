@@ -36,17 +36,54 @@ type Scenario struct {
 	Frames  []Frame
 }
 
-// fixed join times for the demo — stable across runs.
+// fixed join/land times for the demo — stable across runs.
 // carol joined earliest (first to land), then bob, then you (last to land).
 var (
-	demoBase       = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
-	idYou          = pushq.EntryID("you", demoBase, "add auth endpoint")
-	idBob          = pushq.EntryID("bob", demoBase.Add(-90*time.Second), "fix navbar")
-	idCarol        = pushq.EntryID("carol", demoBase.Add(-3*time.Minute), "update deps")
-	demoLanded     = "e3f1a2c refactor user model"
-	carolLanded    = "a1b2c3d update deps"
-	bobLanded      = "b2c3d4e fix navbar"
+	demoBase = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
+
+	idYou   = pushq.EntryID("you", demoBase, "add auth endpoint")
+	idBob   = pushq.EntryID("bob", demoBase.Add(-90*time.Second), "fix navbar")
+	idCarol = pushq.EntryID("carol", demoBase.Add(-3*time.Minute), "update deps")
+
+	recYou = pushq.EntryRecord{
+		ID: idYou, Author: "you", Message: "add auth endpoint",
+		JoinedAt: demoBase,
+	}
+	recBob = pushq.EntryRecord{
+		ID: idBob, Author: "bob", Message: "fix navbar",
+		JoinedAt: demoBase.Add(-90 * time.Second),
+	}
+	recCarol = pushq.EntryRecord{
+		ID: idCarol, Author: "carol", Message: "update deps",
+		JoinedAt: demoBase.Add(-3 * time.Minute),
+	}
+
+	landedBefore = &pushq.EntryRecord{
+		Author: "sam", Message: "refactor user model",
+		JoinedAt: demoBase.Add(-12 * time.Minute),
+		LandedAt: demoBase.Add(-8 * time.Minute),
+	}
+	landedCarol = &pushq.EntryRecord{
+		Author: recCarol.Author, Message: recCarol.Message,
+		JoinedAt: recCarol.JoinedAt,
+		LandedAt: demoBase.Add(2 * time.Minute),
+	}
+	landedBob = &pushq.EntryRecord{
+		Author: recBob.Author, Message: recBob.Message,
+		JoinedAt: recBob.JoinedAt,
+		LandedAt: demoBase.Add(4 * time.Minute),
+	}
+	landedYou = &pushq.EntryRecord{
+		Author: recYou.Author, Message: recYou.Message,
+		JoinedAt: recYou.JoinedAt,
+		LandedAt: demoBase.Add(6 * time.Minute),
+	}
 )
+
+func withStatus(r pushq.EntryRecord, status string) pushq.EntryRecord {
+	r.Status = status
+	return r
+}
 
 var happyPath = Scenario{
 	Name: "happy-path",
@@ -65,18 +102,18 @@ var happyPath = Scenario{
 		// joining: carol and bob are already in the queue ahead of you
 		{pushq.PhaseChanged{Phase: pushq.PhaseJoining}, 800 * time.Millisecond},
 		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: idCarol, Status: "testing"},
-			{ID: idBob, Status: "waiting"},
-			{ID: idYou, Status: "waiting"},
-		}, Landed: demoLanded}, 600 * time.Millisecond},
+			withStatus(recCarol, "testing"),
+			withStatus(recBob, "waiting"),
+			withStatus(recYou, "waiting"),
+		}, Landed: landedBefore}, 600 * time.Millisecond},
 
 		// testing: your tests start running concurrently with carol's
 		{pushq.PhaseChanged{Phase: pushq.PhaseTesting}, 0},
 		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: idCarol, Status: "testing"},
-			{ID: idBob, Status: "waiting"},
-			{ID: idYou, Status: "testing"},
-		}, Landed: demoLanded}, 0},
+			withStatus(recCarol, "testing"),
+			withStatus(recBob, "waiting"),
+			withStatus(recYou, "testing"),
+		}, Landed: landedBefore}, 0},
 		{pushq.LogLine{Text: "  > go test ./..."}, 400 * time.Millisecond},
 		{pushq.LogLine{Text: ""}, 0},
 		{pushq.LogLine{Text: "  ok   github.com/acme/app/api    1.204s"}, 700 * time.Millisecond},
@@ -88,18 +125,18 @@ var happyPath = Scenario{
 		// waiting: carol landed, bob is next
 		{pushq.PhaseChanged{Phase: pushq.PhaseWaiting}, 0},
 		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: idBob, Status: "testing"},
-			{ID: idYou, Status: "testing"},
-		}, Landed: carolLanded}, 2200 * time.Millisecond},
+			withStatus(recBob, "testing"),
+			withStatus(recYou, "testing"),
+		}, Landed: landedCarol}, 2200 * time.Millisecond},
 
 		// landing: bob landed, you are next
 		{pushq.PhaseChanged{Phase: pushq.PhaseLanding}, 0},
 		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
-			{ID: idYou, Status: "testing"},
-		}, Landed: bobLanded}, 1200 * time.Millisecond},
+			withStatus(recYou, "testing"),
+		}, Landed: landedBob}, 1200 * time.Millisecond},
 
 		// you landed — queue is empty, your commit is now the landed entry
-		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{}, Landed: "c3d4e5f add auth endpoint"}, 300 * time.Millisecond},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{}, Landed: landedYou}, 300 * time.Millisecond},
 
 		// done
 		{pushq.Done{}, 0},

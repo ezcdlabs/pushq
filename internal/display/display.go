@@ -16,6 +16,7 @@ var (
 	colorCyan  = lipgloss.Color("6")
 	colorGreen = lipgloss.Color("2")
 	colorGray  = lipgloss.Color("8")
+	colorWhite = lipgloss.Color("15")
 )
 
 var spinnerFrames = []string{"⠴", "⠦", "⠧", "⠇", "⠏", "⠋", "⠙", "⠹", "⠸", "⠼"}
@@ -84,7 +85,7 @@ func isTerminal(w io.Writer) bool {
 // suppressed unless verbose is true.
 func RunInline(session PushSession, out io.Writer, username string, verbose bool) error {
 	var entries []pushq.EntryRecord
-	var landed string
+	var landed *pushq.EntryRecord
 	var finalErr error
 	spinnerIdx := 0
 	joined := false
@@ -93,10 +94,11 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 	printer := &snapshotPrinter{out: out, inPlace: inPlace}
 
 	printSnapshot := func() {
+		now := time.Now()
 		if !joined {
 			printer.print("\n" + renderJoining(spinnerIdx) + "\n")
 		} else {
-			printer.print("\n" + renderJoined() + "\n\nQueue\n" + RenderQueueState(entries, username, landed, spinnerIdx))
+			printer.print("\n" + renderJoined() + "\n\nQueue\n" + RenderQueueState(entries, username, landed, spinnerIdx, now))
 		}
 	}
 
@@ -149,40 +151,62 @@ func renderJoined() string {
 // RenderQueueState returns a formatted string of queue entries. Entries are
 // displayed in reverse queue order (last to land at top, first to land at
 // bottom) so the display reads like git log — newest above, oldest below.
-// Entries belonging to username are marked with ">". If landed is non-empty it
-// is rendered as the bottom row representing the most recently landed commit.
-func RenderQueueState(entries []pushq.EntryRecord, username string, landed string, spinnerIdx int) string {
+// Entries belonging to username are marked with ">". If landed is non-nil it
+// is rendered as the bottom row with a fixed elapsed duration.
+func RenderQueueState(entries []pushq.EntryRecord, username string, landed *pushq.EntryRecord, spinnerIdx int, now time.Time) string {
 	var sb strings.Builder
 
 	ownPrefix := username + "-"
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
 		isOwn := strings.HasPrefix(e.ID, ownPrefix)
-
-		marker := "  "
-		if isOwn {
-			marker = lipgloss.NewStyle().Foreground(colorCyan).Render("> ")
-		}
-
-		icon := EntryIcon(e.Status, spinnerIdx)
-
-		idStyle := lipgloss.NewStyle()
-		if isOwn {
-			idStyle = idStyle.Bold(true)
-		} else {
-			idStyle = idStyle.Foreground(colorGray)
-		}
-
-		sb.WriteString(fmt.Sprintf("%s%s  %s\n", marker, icon, idStyle.Render(e.ID)))
+		sb.WriteString(renderEntryLine(e, isOwn, EntryIcon(e.Status, spinnerIdx), now))
 	}
 
-	if landed != "" {
+	if landed != nil {
 		check := lipgloss.NewStyle().Foreground(colorGreen).Render("✔")
-		label := lipgloss.NewStyle().Foreground(colorGray).Render(landed)
-		sb.WriteString(fmt.Sprintf("  %s  %s\n", check, label))
+		sb.WriteString(renderEntryLine(*landed, false, check, now))
 	}
 
 	return sb.String()
+}
+
+func renderEntryLine(e pushq.EntryRecord, isOwn bool, icon string, now time.Time) string {
+	marker := "  "
+	if isOwn {
+		marker = lipgloss.NewStyle().Foreground(colorCyan).Render("> ")
+	}
+
+	var authorStyle, msgStyle lipgloss.Style
+	if isOwn {
+		authorStyle = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+		msgStyle = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
+	} else {
+		authorStyle = lipgloss.NewStyle().Foreground(colorGray)
+		msgStyle = lipgloss.NewStyle().Foreground(colorGray)
+	}
+
+	elapsed := entryElapsed(e, now)
+	elapsedStr := ""
+	if elapsed != "" {
+		elapsedStr = "  " + lipgloss.NewStyle().Foreground(colorGray).Render(elapsed)
+	}
+
+	return fmt.Sprintf("%s%s  %s  %s%s\n",
+		marker, icon,
+		authorStyle.Render(e.Author),
+		msgStyle.Render(e.Message),
+		elapsedStr)
+}
+
+func entryElapsed(e pushq.EntryRecord, now time.Time) string {
+	if e.JoinedAt.IsZero() {
+		return ""
+	}
+	if !e.LandedAt.IsZero() {
+		return formatElapsed(e.LandedAt.Sub(e.JoinedAt))
+	}
+	return formatElapsed(now.Sub(e.JoinedAt))
 }
 
 // EntryIcon returns the status icon for a queue entry, using spinnerIdx to

@@ -44,18 +44,21 @@ type Event interface {
 
 // EntryRecord is a queue entry as seen by the caller.
 type EntryRecord struct {
-	ID     string
-	Ref    string
-	Status string
+	ID       string
+	Ref      string
+	Status   string
+	Author   string
+	Message  string
+	JoinedAt time.Time
+	LandedAt time.Time // zero if not yet landed
 }
 
-// QueueStateChanged is emitted after joining and on each state poll during the
-// wait loop. Entries contains active (non-landed) entries in queue order.
-// Landed is the display label for the most recently landed commit (e.g.
-// "abc1234 fix navbar"); empty if unavailable.
+// QueueStateChanged is emitted after joining and on each state poll during
+// the wait loop. Entries contains active (non-landed) entries in queue order.
+// Landed is the most recently landed entry; nil if unavailable.
 type QueueStateChanged struct {
 	Entries []EntryRecord
-	Landed  string
+	Landed  *EntryRecord
 }
 
 func (QueueStateChanged) sealedEvent() {}
