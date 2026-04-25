@@ -10,9 +10,9 @@ import (
 // fixed join times for the demo — stable across runs.
 var (
 	demoBase  = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
-	idYou     = pushq.EntryID("you", demoBase)
-	idBob     = pushq.EntryID("bob", demoBase.Add(-90*time.Second))
-	idCarol   = pushq.EntryID("carol", demoBase.Add(-3*time.Minute))
+	idYou   = pushq.EntryID("you", demoBase, "add auth endpoint")
+	idBob   = pushq.EntryID("bob", demoBase.Add(-90*time.Second), "fix navbar")
+	idCarol = pushq.EntryID("carol", demoBase.Add(-3*time.Minute), "update deps")
 )
 
 // shellPrompt renders a Ubuntu-style coloured bash prompt.

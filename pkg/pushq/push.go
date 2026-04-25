@@ -55,7 +55,7 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 	events <- PhaseChanged{Phase: PhaseJoining}
 
 	// 1. Squash local commits since main into one commit and push to queue ref.
-	entryID := EntryID(opts.Username, time.Now())
+	entryID := EntryID(opts.Username, time.Now(), opts.CommitMessage)
 	entryRef := "refs/pushq/" + entryID
 
 	if err := squashAndPushEntryRef(opts.RepoPath, opts.Remote, opts.MainBranch, opts.CommitMessage, entryRef); err != nil {

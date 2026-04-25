@@ -2,12 +2,39 @@ package pushq
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
-// EntryID returns the queue entry identifier for a given username and join time.
-func EntryID(username string, t time.Time) string {
-	return username + "-" + fmt.Sprintf("%d", t.UnixMilli())
+// EntryID returns the queue entry identifier for a given username, join time,
+// and squash commit message.
+func EntryID(username string, t time.Time, commitMessage string) string {
+	id := username + "-" + fmt.Sprintf("%d", t.UnixMilli())
+	if slug := slugifyCommitMessage(commitMessage); slug != "" {
+		id += "-" + slug
+	}
+	return id
+}
+
+// slugifyCommitMessage converts a commit message into a short lowercase
+// hyphenated string safe for use in a git ref or queue entry ID.
+func slugifyCommitMessage(msg string) string {
+	msg = strings.ToLower(msg)
+	var b strings.Builder
+	prevHyphen := true // suppress leading hyphens
+	for _, r := range msg {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevHyphen = false
+		case r == ' ' || r == '-':
+			if !prevHyphen {
+				b.WriteRune('-')
+				prevHyphen = true
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "-")
 }
 
 // Event is the sealed interface for all events emitted by Push.
