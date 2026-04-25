@@ -8,8 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/ezcdlabs/pushq/config"
+"github.com/ezcdlabs/pushq/config"
 	"github.com/ezcdlabs/pushq/pkg/pushq"
 )
 
@@ -102,43 +101,14 @@ func run() error {
 		},
 	}
 
-	if isTerminal() {
-		return runTUI(session, repoPath, stashed)
-	}
-	return runPlain(session, repoPath, stashed)
-}
+	verbose := len(os.Args) > 1 && os.Args[1] == "--verbose"
 
-// isTerminal reports whether stdout is an interactive terminal.
-func isTerminal() bool {
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
-}
-
-// runTUI runs the Bubbletea TUI (requires a real terminal).
-func runTUI(session PushSession, repoPath string, stashed bool) error {
-	p := tea.NewProgram(initialModel(session), tea.WithAltScreen())
-	finalRaw, err := p.Run()
-	if err != nil {
-		return fmt.Errorf("tui: %w", err)
-	}
-	final := finalRaw.(model)
-
-	if final.err != nil {
-		if len(final.logLines) > 0 {
-			fmt.Fprintln(os.Stderr, "\n--- test output ---")
-			for _, line := range final.logLines {
-				fmt.Fprintln(os.Stderr, line)
-			}
-			fmt.Fprintln(os.Stderr, "---")
-		}
-		fmt.Fprintf(os.Stderr, "\nfailed: %v\n", final.err)
+	if err := runInline(session, os.Stdout, username, verbose); err != nil {
+		fmt.Fprintf(os.Stderr, "\nfailed: %v\n", err)
 		if stashed {
 			fmt.Fprintln(os.Stderr, "Your changes are still stashed. Run 'git stash pop' to restore.")
 		}
-		return final.err
+		return err
 	}
 
 	fmt.Println("\nlanded.")
@@ -151,41 +121,6 @@ func runTUI(session PushSession, repoPath string, stashed bool) error {
 	return nil
 }
 
-// runPlain streams events to stdout without a TUI. Used when stdout is not a
-// terminal (CI, Docker, pipes).
-func runPlain(session PushSession, repoPath string, stashed bool) error {
-	var logLines []string
-	var finalErr error
-
-	for ev := range session.Start() {
-		switch e := ev.(type) {
-		case pushq.PhaseChanged:
-			fmt.Printf("pushq: %s\n", e.Phase)
-		case pushq.LogLine:
-			fmt.Println(e.Text)
-			logLines = append(logLines, e.Text)
-		case pushq.Done:
-			finalErr = e.Err
-		}
-	}
-
-	if finalErr != nil {
-		fmt.Fprintf(os.Stderr, "failed: %v\n", finalErr)
-		if stashed {
-			fmt.Fprintln(os.Stderr, "Your changes are still stashed. Run 'git stash pop' to restore.")
-		}
-		return finalErr
-	}
-
-	fmt.Println("landed.")
-	if stashed {
-		fmt.Println("Restoring stashed changes...")
-		if err := pushq.StashPop(repoPath); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: stash pop failed: %v\nRun 'git stash pop' manually.\n", err)
-		}
-	}
-	return nil
-}
 
 // realSession implements PushSession using pkg/pushq.
 type realSession struct {
