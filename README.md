@@ -272,7 +272,28 @@ If tests are already running when the queue changes, finish the current run firs
 
 ### Live queue display during `git pushq`
 
-While `git pushq` is running, it prints queue state updates inline in the terminal — no alt-screen takeover. Each poll that produces a change prints a fresh snapshot of the queue (entry IDs and statuses) directly to stdout. The test command's output is suppressed by default; pass `--verbose` to stream it.
+While `git pushq` is running, the terminal shows an inline queue view — no alt-screen takeover, so output stays in the scrollback buffer and is visible in CI logs.
+
+**Layout:**
+
+```
+✔ joined
+
+Queue
+  ·  carol  update deps              3m 04s
+> ⠴  you    add auth endpoint           42s
+✔  sam    refactor user model       4m 00s
+```
+
+- Entries are rendered in reverse queue order: the entry closest to landing is at the bottom, newest joiners at the top. The view reads top-to-bottom like `git log` — most recent above, oldest below.
+- The bottom row is the most recently landed commit (fixed elapsed = landed time minus join time).
+- Each entry shows a status icon, author, message, and elapsed timer right-aligned to the terminal edge.
+- Own entry is marked with `>` and highlighted.
+- Status icons: `⠴` animated braille spinner (testing), `·` gray dot (waiting), `✔` green check (landed), `✗` red cross (ejected).
+- The display updates in-place using ANSI cursor movement — no repeated output on each event.
+- When ejected due to test failure, the own entry's icon changes to `✗` before the session ends.
+
+The test command's output is suppressed by default; pass `--verbose` to stream it.
 
 There are no separate `git pushq status` or `git pushq cancel` commands.
 
@@ -376,9 +397,9 @@ type PushSession interface {
 
 ### Display: Lipgloss, no alt-screen
 
-The live queue display and end-result summary are rendered with [Lipgloss](https://github.com/charmbracelet/lipgloss) for colour and styling. There is no alt-screen takeover — output is written inline to the terminal so it stays in the scrollback buffer and is visible in CI logs.
+The live queue display is rendered with [Lipgloss](https://github.com/charmbracelet/lipgloss) for colour and styling. Output is written inline to the terminal using ANSI cursor movement for in-place updates — no alt-screen takeover, so output stays in the scrollback buffer and is visible in CI logs.
 
-[Bubble Tea](https://github.com/charmbracelet/bubbletea) is still used in `cmd/demo` for the interactive design browser, and the `PushSession` / event model it introduced is retained as the internal seam for testing.
+The `PushSession` / event model used by the display layer is the internal seam for testing: the display is tested by injecting a fake session with scripted events, with no git operations involved.
 
 ### go-git vs shelling out
 
@@ -407,18 +428,12 @@ for {
 
 ### Recording demos
 
-`cmd/demo` is an interactive design browser and scenario player for the TUI. It is completely standalone — no git server or real push queue needed.
-
-**Interactive browser** (step through all design states with arrow keys):
-
-```sh
-go run ./cmd/demo
-```
-
-**Scenario playback** (auto-plays a scripted narrative end-to-end):
+`cmd/demo` is a scenario player for the display layer. It is completely standalone — no git server or real push queue needed. Available scenarios: `happy-path`, `test-failure`, `ahead-ejected`.
 
 ```sh
 go run ./cmd/demo --play happy-path
+go run ./cmd/demo --play test-failure
+go run ./cmd/demo --play ahead-ejected
 ```
 
 **Recording a GIF** with [asciinema](https://asciinema.org) and [agg](https://github.com/asciinema/agg):
@@ -471,4 +486,3 @@ Issues are grouped roughly by when they are likely to surface.
 
 - **Multi-commit option** — v1 squashes always; a future flag could preserve commits for teams with atomic-commit history policies (squash for the queue ref, restore original commits when landing on main).
 - **Desktop notifications** — since tests take ~1 minute and developers context-switch, a `notify-send` / macOS notification on completion would let users move on without polling the terminal.
-- **Per-entry elapsed time** — the queue display currently shows a total elapsed time for the run. A future improvement would show a running timer next to each entry, since we know each entry's join time from the entry ID timestamp.

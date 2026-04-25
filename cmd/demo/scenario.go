@@ -216,6 +216,7 @@ var aheadEjected = Scenario{
 		}, Landed: landedBefore}, 1800 * time.Millisecond},
 
 		// retest: bob is gone so we must re-run without his changes in the stack
+		{pushq.Note{Text: "  bob's entry left the queue — retesting without their changes"}, 0},
 		{pushq.PhaseChanged{Phase: pushq.PhaseTesting}, 0},
 		{pushq.LogLine{Text: "  > go test ./..."}, 400 * time.Millisecond},
 		{pushq.LogLine{Text: ""}, 0},

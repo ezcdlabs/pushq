@@ -28,6 +28,24 @@ func (f *fakeSession) Cancel() {}
 // fixed reference time used across rendering tests
 var testNow = time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
 
+func TestRenderQueueState_OwnEjectedEntryUsesRedMarker(t *testing.T) {
+	entries := []pushq.EntryRecord{
+		{ID: "alice-100-x", Author: "alice", Message: "add feature", Status: "ejected"},
+	}
+	out := RenderQueueState(entries, "alice", nil, 0, testNow, 0)
+
+	// The own ejected line must contain both ">" and "✗"
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, ">") && strings.Contains(line, "✗") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected own ejected entry to have both '>' marker and '✗' icon:\n%s", out)
+	}
+}
+
 func TestRenderQueueState_MarksOwnEntry(t *testing.T) {
 	entries := []pushq.EntryRecord{
 		{ID: "alice-100-add-feature", Author: "alice", Message: "add feature", Status: "testing"},
@@ -264,6 +282,20 @@ func TestRunInline_PrintsQueueOnStateChange(t *testing.T) {
 	}
 	if !strings.Contains(out, "bob") {
 		t.Errorf("expected bob in output:\n%s", out)
+	}
+}
+
+func TestRunInline_AlwaysShowsNoteEvents(t *testing.T) {
+	session := &fakeSession{events: []pushq.Event{
+		pushq.Note{Text: "retesting — entry ahead was ejected"},
+		pushq.Done{},
+	}}
+
+	var buf strings.Builder
+	RunInline(session, &buf, "alice", false, nil)
+
+	if !strings.Contains(buf.String(), "retesting — entry ahead was ejected") {
+		t.Errorf("expected Note text in output regardless of verbose:\n%s", buf.String())
 	}
 }
 

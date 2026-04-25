@@ -88,6 +88,14 @@ type LogLine struct {
 
 func (LogLine) sealedEvent() {}
 
+// Note is an informational message emitted by Push for display to the user.
+// Unlike LogLine, Note is always shown regardless of verbose mode.
+type Note struct {
+	Text string
+}
+
+func (Note) sealedEvent() {}
+
 // Done is the terminal event — always the last event emitted on the channel.
 // Err is nil on success, non-nil on failure or ejection.
 type Done struct {

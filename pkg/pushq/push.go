@@ -147,6 +147,7 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 				return fmt.Errorf("run tests: %w", runErr)
 			}
 			if !result.Passed {
+				events <- ejectedQueueState(opts, entryID, entries)
 				_ = eject(opts.RepoPath, opts.Remote, entryID, entryRef)
 				return fmt.Errorf("tests failed:\n%s", result.Output)
 			}
@@ -231,6 +232,21 @@ func enrichEntryRecords(repoPath string, entries []queue.EntryRecord) []EntryRec
 		}
 	}
 	return out
+}
+
+// ejectedQueueState builds a QueueStateChanged with the own entry's status
+// overridden to "ejected", so the display can show the failure before Done.
+func ejectedQueueState(opts PushOptions, entryID string, entries []queue.EntryRecord) QueueStateChanged {
+	enriched := enrichEntryRecords(opts.RepoPath, entries)
+	for i := range enriched {
+		if enriched[i].ID == entryID {
+			enriched[i].Status = "ejected"
+		}
+	}
+	return QueueStateChanged{
+		Entries: enriched,
+		Landed:  remoteHeadEntry(opts.RepoPath, opts.Remote, opts.MainBranch),
+	}
 }
 
 // eject removes the entry from the state branch and deletes the entry ref.

@@ -806,3 +806,45 @@ func TestPush_QueueStateChanged_EntriesHaveAuthorMessageAndJoinedAt(t *testing.T
 		t.Error("expected Entry.JoinedAt to be populated")
 	}
 }
+
+// TestPush_TestsFail_EmitsEjectedQueueState verifies that when tests fail,
+// Push emits a final QueueStateChanged with the own entry marked "ejected"
+// before the Done event, so the display can show the failure state.
+func TestPush_TestsFail_EmitsEjectedQueueState(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+
+	clone.WriteFile("feature.txt", "new feature")
+	clone.CommitAll("add feature")
+
+	var ejectedState *pushq.QueueStateChanged
+	for ev := range pushq.Push(context.Background(), pushq.PushOptions{
+		RepoPath:      clone.Path,
+		Remote:        "origin",
+		MainBranch:    "main",
+		TestCommand:   gittest.FailingTestCommand(),
+		CommitMessage: "add feature",
+		Username:      "alice",
+	}) {
+		if qs, ok := ev.(pushq.QueueStateChanged); ok {
+			for _, e := range qs.Entries {
+				if e.Status == "ejected" {
+					ejectedState = &qs
+				}
+			}
+		}
+	}
+
+	if ejectedState == nil {
+		t.Fatal("expected a QueueStateChanged with an ejected entry before Done, got none")
+	}
+	found := false
+	for _, e := range ejectedState.Entries {
+		if strings.HasPrefix(e.ID, "alice-") && e.Status == "ejected" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected alice's entry to have status 'ejected', entries: %+v", ejectedState.Entries)
+	}
+}

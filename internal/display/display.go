@@ -145,6 +145,8 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 				if verbose {
 					fmt.Fprintln(out, e.Text)
 				}
+			case pushq.Note:
+				fmt.Fprintln(out, e.Text)
 			case pushq.Done:
 				finalErr = e.Err
 			}
@@ -190,13 +192,22 @@ func RenderQueueState(entries []pushq.EntryRecord, username string, landed *push
 }
 
 func renderEntryLine(e pushq.EntryRecord, isOwn bool, icon string, now time.Time, width int) string {
+	ownEjected := isOwn && e.Status == "ejected"
+	markerColor := colorCyan
+	if ownEjected {
+		markerColor = colorRed
+	}
+
 	marker := "  "
 	if isOwn {
-		marker = lipgloss.NewStyle().Foreground(colorCyan).Render("> ")
+		marker = lipgloss.NewStyle().Foreground(markerColor).Render("> ")
 	}
 
 	var authorStyle, msgStyle lipgloss.Style
-	if isOwn {
+	if ownEjected {
+		authorStyle = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+		msgStyle = lipgloss.NewStyle().Foreground(colorRed)
+	} else if isOwn {
 		authorStyle = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
 		msgStyle = lipgloss.NewStyle().Foreground(colorWhite).Bold(true)
 	} else {
