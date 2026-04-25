@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/term"
 	"github.com/ezcdlabs/pushq/pkg/pushq"
 )
 
@@ -82,8 +83,12 @@ func isTerminal(w io.Writer) bool {
 // RunInline processes push events and writes progress to out. While joining,
 // a single status line is shown. Once queue state is received, a "joined" +
 // Queue block is rendered and updated in-place on each change. Test output is
-// suppressed unless verbose is true.
-func RunInline(session PushSession, out io.Writer, username string, verbose bool) error {
+// suppressed unless verbose is true. nowFn provides the current time for
+// elapsed calculations; when nil it defaults to time.Now.
+func RunInline(session PushSession, out io.Writer, username string, verbose bool, nowFn func() time.Time) error {
+	if nowFn == nil {
+		nowFn = time.Now
+	}
 	var entries []pushq.EntryRecord
 	var landed *pushq.EntryRecord
 	var finalErr error
@@ -93,12 +98,23 @@ func RunInline(session PushSession, out io.Writer, username string, verbose bool
 	inPlace := !verbose && isTerminal(out)
 	printer := &snapshotPrinter{out: out, inPlace: inPlace}
 
+	termWidth := func() int {
+		if !inPlace {
+			return 0
+		}
+		w, _, err := term.GetSize(os.Stdout.Fd())
+		if err != nil || w <= 0 {
+			return 0
+		}
+		return w
+	}
+
 	printSnapshot := func() {
-		now := time.Now()
+		now := nowFn()
 		if !joined {
 			printer.print("\n" + renderJoining(spinnerIdx) + "\n")
 		} else {
-			printer.print("\n" + renderJoined() + "\n\nQueue\n" + RenderQueueState(entries, username, landed, spinnerIdx, now))
+			printer.print("\n" + renderJoined() + "\n\nQueue\n" + RenderQueueState(entries, username, landed, spinnerIdx, now, termWidth()))
 		}
 	}
 
@@ -152,26 +168,27 @@ func renderJoined() string {
 // displayed in reverse queue order (last to land at top, first to land at
 // bottom) so the display reads like git log — newest above, oldest below.
 // Entries belonging to username are marked with ">". If landed is non-nil it
-// is rendered as the bottom row with a fixed elapsed duration.
-func RenderQueueState(entries []pushq.EntryRecord, username string, landed *pushq.EntryRecord, spinnerIdx int, now time.Time) string {
+// is rendered as the bottom row with a fixed elapsed duration. When width > 0,
+// elapsed timers are right-aligned to that column.
+func RenderQueueState(entries []pushq.EntryRecord, username string, landed *pushq.EntryRecord, spinnerIdx int, now time.Time, width int) string {
 	var sb strings.Builder
 
 	ownPrefix := username + "-"
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
 		isOwn := strings.HasPrefix(e.ID, ownPrefix)
-		sb.WriteString(renderEntryLine(e, isOwn, EntryIcon(e.Status, spinnerIdx), now))
+		sb.WriteString(renderEntryLine(e, isOwn, EntryIcon(e.Status, spinnerIdx), now, width))
 	}
 
 	if landed != nil {
 		check := lipgloss.NewStyle().Foreground(colorGreen).Render("✔")
-		sb.WriteString(renderEntryLine(*landed, false, check, now))
+		sb.WriteString(renderEntryLine(*landed, false, check, now, width))
 	}
 
 	return sb.String()
 }
 
-func renderEntryLine(e pushq.EntryRecord, isOwn bool, icon string, now time.Time) string {
+func renderEntryLine(e pushq.EntryRecord, isOwn bool, icon string, now time.Time, width int) string {
 	marker := "  "
 	if isOwn {
 		marker = lipgloss.NewStyle().Foreground(colorCyan).Render("> ")
@@ -187,16 +204,35 @@ func renderEntryLine(e pushq.EntryRecord, isOwn bool, icon string, now time.Time
 	}
 
 	elapsed := entryElapsed(e, now)
-	elapsedStr := ""
+	elapsedRendered := ""
 	if elapsed != "" {
-		elapsedStr = "  " + lipgloss.NewStyle().Foreground(colorGray).Render(elapsed)
+		elapsedRendered = lipgloss.NewStyle().Foreground(colorGray).Render(elapsed)
 	}
 
-	return fmt.Sprintf("%s%s  %s  %s%s\n",
+	left := fmt.Sprintf("%s%s  %s  %s",
 		marker, icon,
 		authorStyle.Render(e.Author),
-		msgStyle.Render(e.Message),
-		elapsedStr)
+		msgStyle.Render(e.Message))
+
+	if elapsedRendered == "" {
+		if width > 0 {
+			pad := width - lipgloss.Width(left)
+			if pad > 0 {
+				left += strings.Repeat(" ", pad)
+			}
+		}
+		return left + "\n"
+	}
+
+	if width > 0 {
+		pad := width - lipgloss.Width(left) - lipgloss.Width(elapsedRendered)
+		if pad < 2 {
+			pad = 2
+		}
+		return left + strings.Repeat(" ", pad) + elapsedRendered + "\n"
+	}
+
+	return left + "  " + elapsedRendered + "\n"
 }
 
 func entryElapsed(e pushq.EntryRecord, now time.Time) string {

@@ -104,7 +104,7 @@ func run() error {
 
 	verbose := len(os.Args) > 1 && os.Args[1] == "--verbose"
 
-	if err := display.RunInline(session, os.Stdout, username, verbose); err != nil {
+	if err := display.RunInline(session, os.Stdout, username, verbose, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "\nfailed: %v\n", err)
 		if stashed {
 			fmt.Fprintln(os.Stderr, "Your changes are still stashed. Run 'git stash pop' to restore.")

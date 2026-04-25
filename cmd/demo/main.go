@@ -80,8 +80,13 @@ func playScenario(s *Scenario) error {
 	time.Sleep(400 * time.Millisecond)
 
 	// Phase 2: run events through the real display code.
+	// nowFn advances virtual time from demoBase in lockstep with real elapsed
+	// time so that elapsed timers in the demo show realistic durations.
+	scenarioStart := time.Now()
+	nowFn := func() time.Time { return demoBase.Add(time.Since(scenarioStart)) }
+
 	session := &scenarioSession{frames: s.Frames}
-	if err := display.RunInline(session, os.Stdout, "you", false); err != nil {
+	if err := display.RunInline(session, os.Stdout, "you", false, nowFn); err != nil {
 		return err
 	}
 
