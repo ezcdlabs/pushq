@@ -86,12 +86,22 @@ func playScenario(s *Scenario) error {
 	nowFn := func() time.Time { return demoBase.Add(time.Since(scenarioStart)) }
 
 	session := &scenarioSession{frames: s.Frames}
-	if err := display.RunInline(session, os.Stdout, "you", false, nowFn); err != nil {
-		return err
-	}
+	err := display.RunInline(session, os.Stdout, "you", s.Verbose, nowFn)
 
 	// Phase 3: post-session output.
 	time.Sleep(200 * time.Millisecond)
-	fmt.Println("\nlanded.")
+	if err != nil {
+		msg := s.FailureMsg
+		if msg == "" {
+			msg = fmt.Sprintf("\nfailed: %v", err)
+		}
+		fmt.Println(msg)
+	} else {
+		msg := s.SuccessMsg
+		if msg == "" {
+			msg = "\nlanded."
+		}
+		fmt.Println(msg)
+	}
 	return nil
 }

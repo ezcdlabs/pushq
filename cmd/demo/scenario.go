@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -31,9 +32,12 @@ type Frame struct {
 
 // Scenario is a named sequence used for demo recording and screenshots.
 type Scenario struct {
-	Name    string
-	Prelude []PreludeLine
-	Frames  []Frame
+	Name       string
+	Prelude    []PreludeLine
+	Frames     []Frame
+	Verbose    bool   // show test log output
+	SuccessMsg string // printed on clean exit; default "\nlanded."
+	FailureMsg string // printed on error exit; default "\nfailed: <err>"
 }
 
 // fixed join/land times for the demo — stable across runs.
@@ -143,6 +147,91 @@ var happyPath = Scenario{
 	},
 }
 
+var testFailure = Scenario{
+	Name:       "test-failure",
+	Verbose:    true,
+	FailureMsg: "\nfailed: tests failed.",
+	Prelude:    happyPath.Prelude,
+	Frames: []Frame{
+		// joining: carol is ahead, no bob
+		{pushq.PhaseChanged{Phase: pushq.PhaseJoining}, 800 * time.Millisecond},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			withStatus(recCarol, "testing"),
+			withStatus(recYou, "waiting"),
+		}, Landed: landedBefore}, 600 * time.Millisecond},
+
+		// testing: your tests start
+		{pushq.PhaseChanged{Phase: pushq.PhaseTesting}, 0},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			withStatus(recCarol, "testing"),
+			withStatus(recYou, "testing"),
+		}, Landed: landedBefore}, 0},
+		{pushq.LogLine{Text: "  > go test ./..."}, 400 * time.Millisecond},
+		{pushq.LogLine{Text: ""}, 0},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/api    1.204s"}, 700 * time.Millisecond},
+		{pushq.LogLine{Text: "  --- FAIL: TestAuth/ExpiredToken (0.02s)"}, 700 * time.Millisecond},
+		{pushq.LogLine{Text: "      auth_test.go:58: got status 200, want 401"}, 0},
+		{pushq.LogLine{Text: "  FAIL github.com/acme/app/auth   0.831s"}, 0},
+		{pushq.LogLine{Text: "  FAIL"}, 0},
+		{pushq.LogLine{Text: ""}, 900 * time.Millisecond},
+
+		// ejected
+		{pushq.Done{Err: errors.New("tests failed")}, 0},
+	},
+}
+
+var aheadEjected = Scenario{
+	Name:    "ahead-ejected",
+	Verbose: false,
+	Prelude: happyPath.Prelude,
+	Frames: []Frame{
+		// joining: bob is ahead of you
+		{pushq.PhaseChanged{Phase: pushq.PhaseJoining}, 800 * time.Millisecond},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			withStatus(recBob, "testing"),
+			withStatus(recYou, "waiting"),
+		}, Landed: landedBefore}, 600 * time.Millisecond},
+
+		// testing: both running concurrently
+		{pushq.PhaseChanged{Phase: pushq.PhaseTesting}, 0},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			withStatus(recBob, "testing"),
+			withStatus(recYou, "testing"),
+		}, Landed: landedBefore}, 0},
+		{pushq.LogLine{Text: "  > go test ./..."}, 400 * time.Millisecond},
+		{pushq.LogLine{Text: ""}, 0},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/api    1.204s"}, 700 * time.Millisecond},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/auth   0.812s"}, 700 * time.Millisecond},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/db     2.001s"}, 0},
+		{pushq.LogLine{Text: ""}, 0},
+		{pushq.LogLine{Text: "  All tests passed."}, 900 * time.Millisecond},
+
+		// waiting — bob disappears (ejected), triggering a retest
+		{pushq.PhaseChanged{Phase: pushq.PhaseWaiting}, 0},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{
+			withStatus(recYou, "testing"),
+		}, Landed: landedBefore}, 1800 * time.Millisecond},
+
+		// retest: bob is gone so we must re-run without his changes in the stack
+		{pushq.PhaseChanged{Phase: pushq.PhaseTesting}, 0},
+		{pushq.LogLine{Text: "  > go test ./..."}, 400 * time.Millisecond},
+		{pushq.LogLine{Text: ""}, 0},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/api    1.189s"}, 700 * time.Millisecond},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/auth   0.804s"}, 700 * time.Millisecond},
+		{pushq.LogLine{Text: "  ok   github.com/acme/app/db     1.973s"}, 0},
+		{pushq.LogLine{Text: ""}, 0},
+		{pushq.LogLine{Text: "  All tests passed."}, 900 * time.Millisecond},
+
+		// landing
+		{pushq.PhaseChanged{Phase: pushq.PhaseLanding}, 0},
+		{pushq.QueueStateChanged{Entries: []pushq.EntryRecord{}, Landed: landedYou}, 300 * time.Millisecond},
+
+		{pushq.Done{}, 0},
+	},
+}
+
 var allScenarios = map[string]*Scenario{
-	"happy-path": &happyPath,
+	"happy-path":    &happyPath,
+	"test-failure":  &testFailure,
+	"ahead-ejected": &aheadEjected,
 }
