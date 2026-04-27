@@ -59,6 +59,7 @@ func LandEntry(repoPath, remote, entryID, mainSHA string) error {
 // ReadState fetches the state branch and returns active entries in queue order
 // plus the most recent landed record (nil if nothing has landed yet).
 func ReadState(repoPath, remote string) ([]EntryRecord, *LandedEntry, error) {
+	defer deleteLocalStateRef(repoPath)
 	if err := fetchStateBranch(repoPath, remote); err != nil {
 		return nil, nil, err
 	}
@@ -90,6 +91,7 @@ func ReadEntry(repoPath, remote, entryID string) (*EntryRecord, error) {
 // ListEntries fetches the state branch and returns all active entries in queue
 // order (commit order on the state branch).
 func ListEntries(repoPath, remote string) ([]EntryRecord, error) {
+	defer deleteLocalStateRef(repoPath)
 	if err := fetchStateBranch(repoPath, remote); err != nil {
 		return nil, err
 	}
@@ -161,6 +163,7 @@ func (sm *stateManager) landEntry(repoPath, remote, entryID, mainSHA string) err
 // updateStateBranch is the optimistic lock loop: fetch, mutate the file tree,
 // commit, push. Retries on fast-forward rejection.
 func (sm *stateManager) updateStateBranch(repoPath, remote string, mutate func(map[string][]byte), message string) error {
+	defer deleteLocalStateRef(repoPath)
 	for {
 		// Fetch (or init) the state branch.
 		_ = fetchStateBranch(repoPath, remote) // ignore error — branch may not exist yet

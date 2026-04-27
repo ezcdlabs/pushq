@@ -302,5 +302,42 @@ func TestJoin_StateTreeHasNoFullPathnames(t *testing.T) {
 	}
 }
 
+// localRefExists reports whether a ref exists in the local repo (not the remote).
+func localRefExists(repoPath, ref string) bool {
+	cmd := exec.Command("git", "rev-parse", "--verify", ref)
+	cmd.Dir = repoPath
+	return cmd.Run() == nil
+}
+
+// TestStateRef_NotPersisted verifies that refs/pushq/state is not left as a
+// persistent local ref after queue operations. The commits exist in the object
+// store but should not be reachable via any ref, so they don't appear in
+// git log --all.
+func TestStateRef_NotPersisted(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+
+	if err := queue.Join(clone.Path, "origin", "alice-1", "refs/pushq/alice-1"); err != nil {
+		t.Fatalf("Join failed: %v", err)
+	}
+	if localRefExists(clone.Path, "refs/pushq/state") {
+		t.Error("refs/pushq/state should not exist locally after Join")
+	}
+
+	if _, _, err := queue.ReadState(clone.Path, "origin"); err != nil {
+		t.Fatalf("ReadState failed: %v", err)
+	}
+	if localRefExists(clone.Path, "refs/pushq/state") {
+		t.Error("refs/pushq/state should not exist locally after ReadState")
+	}
+
+	if err := queue.SetStatus(clone.Path, "origin", "alice-1", "testing"); err != nil {
+		t.Fatalf("SetStatus failed: %v", err)
+	}
+	if localRefExists(clone.Path, "refs/pushq/state") {
+		t.Error("refs/pushq/state should not exist locally after SetStatus")
+	}
+}
+
 // TestJoin_ConcurrentJoins_BothSucceed verifies that two clones joining
 // simultaneously both end up in the queue (optimistic lock retry works).
