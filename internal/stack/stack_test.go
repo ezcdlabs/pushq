@@ -162,6 +162,38 @@ func TestBuild_ConflictingEntry_IsSkipped(t *testing.T) {
 	}
 }
 
+// TestBuild_Cleanup_RestoresBranch verifies that Cleanup leaves the repo on
+// the branch the user was on before Build was called, not in detached HEAD.
+func TestBuild_Cleanup_RestoresBranch(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+
+	clone.WriteFile("feature.txt", "feature")
+	clone.CommitAll("my feature")
+	clone.PushRef("HEAD", "refs/pushq/alice-100")
+
+	if got := clone.CurrentBranch(); got != "main" {
+		t.Fatalf("expected to start on main, got %q", got)
+	}
+
+	result, err := stack.Build(stack.Options{
+		RepoPath:     clone.Path,
+		Remote:       "origin",
+		MainBranch:   "main",
+		OwnRef:       "refs/pushq/alice-100",
+		EntriesAhead: nil,
+	})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	result.Cleanup()
+
+	if got := clone.CurrentBranch(); got != "main" {
+		t.Fatalf("expected to be on main after Cleanup, got %q (detached HEAD?)", got)
+	}
+}
+
 // TestBuild_Cleanup_DeletesBranch verifies that Cleanup removes the temporary
 // test branch from the local repo.
 func TestBuild_Cleanup_DeletesBranch(t *testing.T) {

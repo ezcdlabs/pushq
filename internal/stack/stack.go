@@ -19,17 +19,20 @@ type Options struct {
 
 // Result is the outcome of a successful Build. Call Cleanup when done testing.
 type Result struct {
-	BranchName string
-	repoPath   string
-	remote     string
-	mainBranch string
+	BranchName     string
+	repoPath       string
+	remote         string
+	mainBranch     string
+	originalBranch string // branch to restore after cleanup; empty if was detached
 }
 
-// Cleanup deletes the temporary test branch from the local repo.
+// Cleanup deletes the temporary test branch and restores the original branch.
 func (r *Result) Cleanup() {
-	// Detach HEAD to origin/main so we can delete the test branch regardless
-	// of local branch state.
-	_ = git(r.repoPath, "checkout", "--detach", r.remote+"/"+r.mainBranch)
+	if r.originalBranch != "" {
+		_ = git(r.repoPath, "checkout", r.originalBranch)
+	} else {
+		_ = git(r.repoPath, "checkout", "--detach", r.remote+"/"+r.mainBranch)
+	}
 	_ = git(r.repoPath, "branch", "-D", r.BranchName)
 }
 
@@ -37,6 +40,9 @@ func (r *Result) Cleanup() {
 // order, skipping conflicts) then the developer's own ref, all on top of main.
 func Build(opts Options) (*Result, error) {
 	branchName := "pushq-test-branch"
+
+	// Remember where we are so Cleanup can restore it.
+	originalBranch := currentBranch(opts.RepoPath)
 
 	// Ensure the remote tracking branch is current.
 	_ = git(opts.RepoPath, "fetch", opts.Remote, opts.MainBranch)
@@ -69,7 +75,7 @@ func Build(opts Options) (*Result, error) {
 		return nil, fmt.Errorf("cherry-pick own ref %s: %w", opts.OwnRef, err)
 	}
 
-	return &Result{BranchName: branchName, repoPath: opts.RepoPath, remote: opts.Remote, mainBranch: opts.MainBranch}, nil
+	return &Result{BranchName: branchName, repoPath: opts.RepoPath, remote: opts.Remote, mainBranch: opts.MainBranch, originalBranch: originalBranch}, nil
 }
 
 func cherryPick(repoPath, ref string) error {
@@ -80,6 +86,18 @@ func cherryPick(repoPath, ref string) error {
 // local fetch target (e.g. "refs/pushq/alice-100" → "alice-100").
 func sanitiseRef(ref string) string {
 	return strings.ReplaceAll(ref, "/", "-")
+}
+
+// currentBranch returns the short branch name HEAD points to, or "" if detached.
+func currentBranch(repoPath string) string {
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = repoPath
+	cmd.Env = gitenv.Clean()
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func git(repoPath string, args ...string) error {

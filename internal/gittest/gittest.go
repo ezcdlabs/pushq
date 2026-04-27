@@ -168,6 +168,12 @@ func (c *Clone) LogBranch(branch string) []Commit {
 	return logBranch(c.Path, branch)
 }
 
+// CurrentBranch returns the short name of the current branch, or "" if HEAD is detached.
+func (c *Clone) CurrentBranch() string {
+	out := runOutput(nil, c.Path, "git", "symbolic-ref", "--short", "HEAD")
+	return strings.TrimSpace(out)
+}
+
 // --- helpers -----------------------------------------------------------------
 
 func logBranch(repoPath, branch string) []Commit {
