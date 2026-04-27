@@ -31,17 +31,18 @@ RUN git config --global init.defaultBranch main \
     && git config --global user.name "Seed" \
     && git config --global --add safe.directory /home/git/repo.git \
     && git init --bare --initial-branch=main /home/git/repo.git \
-    && git config --file /home/git/repo.git/config receive.fsckObjects true \
-    && chown -R git:git /home/git/repo.git
+    && git config --file /home/git/repo.git/config receive.fsckObjects true
 
 # Seed an initial commit on main so clones have something to pull from.
+# chown runs after the seed push so root-created object files are git-owned.
 RUN mkdir /tmp/seed \
     && git clone /home/git/repo.git /tmp/seed \
     && touch /tmp/seed/.gitkeep \
     && git -C /tmp/seed add . \
     && git -C /tmp/seed commit -m "initial commit" \
     && git -C /tmp/seed push origin main \
-    && rm -rf /tmp/seed
+    && rm -rf /tmp/seed \
+    && chown -R git:git /home/git/repo.git
 
 EXPOSE 22
 
