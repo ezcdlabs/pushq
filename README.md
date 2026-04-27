@@ -1,6 +1,6 @@
 # pushq (`git pushq`)
 
-<img src="assets/happy-path.gif" width="700">
+![demo](assets/happy-path.gif)
 
 Serverless push queue for trunk-based development. Test your commits against everyone ahead of you in the queue — on your own machine, in parallel, before anything touches main. No server, no PRs, no merge queue service. Just git refs.
 
@@ -304,6 +304,7 @@ To cancel, the user presses `ctrl+c`. This triggers a self-ejection (same flow a
 When `git pushq` finishes, it prints a clear summary regardless of outcome:
 
 **Landed:**
+
 ```
 ✔  Landed on main
    add auth endpoint  (a1b2c3d)
@@ -311,6 +312,7 @@ When `git pushq` finishes, it prints a clear summary regardless of outcome:
 ```
 
 **Tests failed:**
+
 ```
 ✗  Tests failed — ejected from queue
    Run your tests to see the output:
@@ -322,6 +324,7 @@ When `git pushq` finishes, it prints a clear summary regardless of outcome:
 ```
 
 **Ejected (conflict):**
+
 ```
 ✗  Conflict — ejected from queue
    Conflicting entry: bob-1745598500-fix-navbar
