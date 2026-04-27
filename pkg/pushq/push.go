@@ -204,6 +204,15 @@ func push(ctx context.Context, opts PushOptions, events chan<- Event) error {
 				_ = queue.RemoveEntry(opts.RepoPath, opts.Remote, entryID, "done")
 			}
 			_ = refs.DeleteRef(opts.RepoPath, opts.Remote, entryRef)
+
+			// Re-read the remote state: our entry is now gone and the landed
+			// record is updated, so this is identical to the top-of-loop emit.
+			if updatedEntries, _, readErr := queue.ReadState(opts.RepoPath, opts.Remote); readErr == nil {
+				events <- QueueStateChanged{
+					Entries: enrichEntryRecords(opts.RepoPath, updatedEntries),
+					Landed:  remoteHeadEntry(opts.RepoPath, opts.Remote, opts.MainBranch),
+				}
+			}
 			return nil
 		}
 
@@ -378,12 +387,7 @@ func git(repoPath string, args ...string) error {
 func gitCommit(repoPath, message string) error {
 	cmd := exec.Command("git", "commit", "-m", message)
 	cmd.Dir = repoPath
-	cmd.Env = append(gitenv.Clean(),
-		"GIT_AUTHOR_NAME=pushq",
-		"GIT_AUTHOR_EMAIL=pushq@local",
-		"GIT_COMMITTER_NAME=pushq",
-		"GIT_COMMITTER_EMAIL=pushq@local",
-	)
+	cmd.Env = gitenv.Clean()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git commit: %w\n%s", err, out)

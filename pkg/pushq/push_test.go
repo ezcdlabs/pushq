@@ -15,6 +15,15 @@ import (
 	"github.com/ezcdlabs/pushq/pkg/pushq"
 )
 
+func gitLogField(t *testing.T, repoPath, ref, format string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repoPath, "log", "-1", "--format="+format, ref).Output()
+	if err != nil {
+		t.Fatalf("git log %s %s: %v", ref, format, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func gitRevParseTest(t *testing.T, repoPath, ref string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", repoPath, "rev-parse", ref).Output()
@@ -804,6 +813,71 @@ func TestPush_QueueStateChanged_EntriesHaveAuthorMessageAndJoinedAt(t *testing.T
 	}
 	if e.JoinedAt.IsZero() {
 		t.Error("expected Entry.JoinedAt to be populated")
+	}
+}
+
+// TestPush_SquashCommit_UsesRealAuthor verifies that the squash commit pushed
+// to the entry ref (and ultimately to main) carries the user's real git author
+// name, not the hardcoded "pushq" placeholder.
+func TestPush_SquashCommit_UsesRealAuthor(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+
+	clone.WriteFile("feature.txt", "new feature")
+	clone.CommitAll("add feature")
+
+	if err := pushAndWait(context.Background(), pushq.PushOptions{
+		RepoPath:      clone.Path,
+		Remote:        "origin",
+		MainBranch:    "main",
+		TestCommand:   gittest.PassingTestCommand(),
+		CommitMessage: "add feature",
+		Username:      "test",
+	}); err != nil {
+		t.Fatalf("push failed: %v", err)
+	}
+
+	author := strings.TrimSpace(gitLogField(t, remote.Path, "main", "%an"))
+	if author == "pushq" {
+		t.Errorf("squash commit author is 'pushq' — should use real git author")
+	}
+	if author == "" {
+		t.Errorf("squash commit author is empty")
+	}
+}
+
+// TestPush_Landing_EmitsFinalQueueState verifies that after successfully
+// pushing to main, Push emits a QueueStateChanged with empty entries and a
+// non-nil Landed record so the display can show the final landed state.
+func TestPush_Landing_EmitsFinalQueueState(t *testing.T) {
+	remote := gittest.NewRemote(t)
+	clone := remote.NewClone(t)
+
+	clone.WriteFile("feature.txt", "new feature")
+	clone.CommitAll("add feature")
+
+	var lastState *pushq.QueueStateChanged
+	for ev := range pushq.Push(context.Background(), pushq.PushOptions{
+		RepoPath:      clone.Path,
+		Remote:        "origin",
+		MainBranch:    "main",
+		TestCommand:   gittest.PassingTestCommand(),
+		CommitMessage: "add feature",
+		Username:      "test",
+	}) {
+		if qs, ok := ev.(pushq.QueueStateChanged); ok {
+			lastState = &qs
+		}
+	}
+
+	if lastState == nil {
+		t.Fatal("expected at least one QueueStateChanged event")
+	}
+	if len(lastState.Entries) != 0 {
+		t.Errorf("expected empty entries in final QueueStateChanged, got %d entries", len(lastState.Entries))
+	}
+	if lastState.Landed == nil {
+		t.Error("expected Landed to be non-nil in final QueueStateChanged")
 	}
 }
 
